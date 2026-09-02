@@ -1,23 +1,229 @@
-const state={snapshot:null,incidentTab:'active',logType:'verifier',busy:false};
-const $=id=>document.getElementById(id);const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const num=v=>v===null||v===undefined?'–':new Intl.NumberFormat('nl-NL').format(v);const when=v=>{if(!v)return'Onbekend';const d=new Date(v);return Number.isNaN(+d)?'Onbekend':d.toLocaleString('nl-NL',{dateStyle:'short',timeStyle:'short'})};
-const bytes=v=>{let n=Number(v||0),u=0,units=['B','KB','MB','GB','TB'];while(n>=1024&&u<4){n/=1024;u++}return`${n.toLocaleString('nl-NL',{maximumFractionDigits:u?1:0})} ${units[u]}`};
-const label=s=>({healthy:'Gezond',degraded:'Degraded',incident:'Incident',unknown:'Onbekend',active:'Actief'}[s]||s||'Onbekend');
-function row(title,note,value,status='unknown',detail=''){return`<${detail?'button':'div'} class="stack-row ${esc(status)}" ${detail?`data-detail="${esc(detail)}"`:''}><div class="copy"><strong>${esc(title)}</strong><p>${esc(note)}</p></div><span class="badge ${esc(status)}">${esc(value)}</span></${detail?'button':'div'}>`}
-async function load(force=false){$('refreshBtn').disabled=true;try{const r=await fetch(`/api/snapshot${force?'?force=1':''}`);if(!r.ok)throw new Error(`HTTP ${r.status}`);state.snapshot=await r.json();render()}catch(e){$('lastUpdated').textContent=`Niet beschikbaar · ${e.message}`;$('headerStatus').className='badge incident';$('headerStatus').textContent='Offline'}finally{$('refreshBtn').disabled=false}}
-function render(){const s=state.snapshot;$('lastUpdated').textContent=`Bijgewerkt ${when(s.generatedAt)}`;$('headerStatus').className=`badge ${s.overview.status}`;$('headerStatus').textContent=label(s.overview.status);summary(s);incidents(s);chain(s);trends(s);queues(s);wanted(s);providers(s);repairs(s);usage(s);logs(s);actions(s)}
-function summary(s){const q=['sonarr','radarr','nzbdav'].reduce((a,k)=>a+s.queues[k].total,0),stuck=s.overview.failedQueues+s.overview.stalledQueues,repair=s.repairs.summary||{},provider=s.providers.some(p=>p.status==='degraded')?'degraded':s.providers.length?'healthy':'unknown',t=s.history.queueTrend||{};const cards=[['Algemene status',label(s.overview.status),`${s.overview.activeProblems} actieve signalen`,s.overview.status,'incidents'],['Actieve problemen',num(s.overview.activeProblems),s.overview.activeProblems?'Bekijk aanbevolen actie':'Geen actie nodig',s.overview.activeProblems?'incident':'healthy','incidents'],['Queue-items',num(q),stuck?`${stuck} vastgelopen/failed`:'Normale activiteit',stuck?'degraded':q?'active':'healthy','queues'],['Automatisch herstel',num(repair.repairs||0),repair.period||'Nog geen runs',(repair.repairs||0)?'healthy':'unknown','repairs'],['Providerstatus',label(provider),s.providers.length?'Recente logs':'Onvoldoende gegevens',provider,'providers'],['WebDAV-mount',label(s.mounts.overall),`${num(s.mounts.maxLatencyMs)} ms read-latency`,s.mounts.overall,'mount'],['Trend',t.delta===null?'Nog opbouwen':`${t.delta>0?'+':''}${num(t.delta)}`,t.direction==='better'?'Beter dan gisteren':t.direction==='worse'?'Slechter dan gisteren':'Queue t.o.v. gisteren',t.direction==='better'?'healthy':t.direction==='worse'?'degraded':'unknown','trends']];$('summaryGrid').innerHTML=cards.map(c=>`<button class="status-card ${c[3]}" data-detail="${c[4]}"><span class="badge ${c[3]}">${label(c[3])}</span><span class="value">${esc(c[1])}</span><small>${esc(c[2])}</small><time>Laatste meting ${when(s.generatedAt)}</time></button>`).join('')}
-function incidents(s){document.querySelectorAll('[data-incident-tab]').forEach(b=>b.classList.toggle('active',b.dataset.incidentTab===state.incidentTab));const list=s.incidents[state.incidentTab]||[];$('incidentList').innerHTML=list.length?list.slice(0,20).map(i=>row(i.title,`${i.advice} · ${i.source} · ${i.count}× · laatst ${when(i.lastSeen)}`,i.active?'Actief':'Opgelost',i.active?(i.severity==='critical'?'incident':'degraded'):'healthy')).join(''):row(state.incidentTab==='active'?'Geen actieve incidenten':'Geen items',state.incidentTab==='active'?'De keten heeft nu geen log-afgeleide storing.':s.incidents.rules,'Rustig','healthy')}
-function chain(s){$('chain').innerHTML=(s.chain||[]).map(n=>`<div class="chain-node ${esc(n.status)}"><span class="badge ${esc(n.status)}">${label(n.status)}</span><strong>${esc(n.label)}</strong><small>${n.latencyMs!==null?`${num(n.latencyMs)} ms`:n.problem?esc(n.problem):n.lastSuccess?`OK ${when(n.lastSuccess)}`:'Geen betrouwbare check'}</small></div>`).join('')}
-function spark(points,get){const vals=points.map(get).map(Number).filter(Number.isFinite);if(vals.length<2)return'<p class="muted">Historie wordt opgebouwd</p>';const lo=Math.min(...vals),hi=Math.max(...vals),d=hi-lo||1,p=vals.map((v,i)=>`${(i/(vals.length-1))*100},${58-((v-lo)/d)*52}`).join(' ');return`<svg class="spark" viewBox="0 0 100 60" preserveAspectRatio="none" aria-hidden="true"><polyline points="${p}"/></svg>`}
-function trends(s){const p=s.history.points24h||[],all=s.history.points7d||[];const defs=[['Queue totaal',x=>Object.values(x.queue||{}).reduce((a,q)=>a+(q.total||0),0)],['Actieve incidenten',x=>Object.values(x.incidents||{}).reduce((a,v)=>a+v,0)],['Mount latency',x=>x.mount?.latencyMs]];$('trends').innerHTML=defs.map(([name,get])=>`<div class="trend-card"><div class="trend-head"><strong>${name}</strong><span class="muted">${num(get(p.at(-1)||{}))}</span></div>${spark(p,get)}<p class="muted">24 uur · ${all.length} samples in 7 dagen</p></div>`).join('');$('historyMeta').textContent=`Elke ${s.history.sampleMinutes} min · ${s.history.retentionDays} dagen retentie`}
-function queues(s){$('queues').innerHTML=['sonarr','radarr','nzbdav'].map(k=>{const q=s.queues[k],status=!q.ok?'unknown':q.failed?'incident':q.stalled?'degraded':q.total?'active':'healthy';return row(k==='nzbdav'?'InfiniDysk':k[0].toUpperCase()+k.slice(1),q.ok?`${q.active} actief · ${q.stalled} stil · oudste ${q.oldestMinutes||0} min`:'Bron niet bereikbaar',`${q.total} items`,status,'queues')}).join('')}
-function wanted(s){const defs=[['Sonarr missing',s.wanted.sonarr.missing],['Sonarr cutoff unmet',s.wanted.sonarr.cutoff],['Radarr missing',s.wanted.radarr.missing],['Radarr cutoff unmet',s.wanted.radarr.cutoff]];$('wanted').innerHTML=defs.map(([n,v])=>row(n,v===null?'Bron niet bereikbaar':v===0?'Geen backlog':'Monitored backlog; leeftijd niet beschikbaar',num(v),v===null?'unknown':v===0?'healthy':'active')).join('')}
-function providers(s){$('providers').innerHTML=s.providers.length?s.providers.map(p=>row(p.name,`${p.trips} trips · ${p.missingArticles} missing-article signalen · ${p.period}`,label(p.status),p.status)).join(''):row('Geen providerdata','Sunny/Viper worden alleen getoond als echte logdata aanwezig is.','Onbekend','unknown')}
-function repairs(s){const r=s.repairs.summary||{},search=['sonarr_missing','sonarr_upgrade','radarr_missing','radarr_upgrade'].reduce((a,k)=>a+(s.periodic.counts?.[k]||0),0);$('repairs').innerHTML=row('Verifier',`${r.clean||0} schone runs · ${r.succeeded||0} runs met geslaagde repairs`,`${r.repairs||0} repairs`,(r.repairs||0)?'healthy':'info')+row('Searchacties',`${s.periodic.counts?.radarr_missing_backoff||0} backoffs · huidige logsnapshot`,num(search),search?'active':'healthy')}
-function usage(s){const p=s.usage?.periods||{};$('usage').innerHTML=[['Vandaag',p.daily],['Week',p.weekly],['Maand',p.monthly],['Jaar',p.yearly],['Dashboard totaal',p.allTime]].map(([n,v])=>`<div class="usage-card"><span>${n}</span><strong>${bytes(v?.totalBytes)}</strong><span>in ${bytes(v?.rxBytes)} · uit ${bytes(v?.txBytes)}</span></div>`).join('')}
-function logs(s){$('logBox').textContent=(s.logs[state.logType]||[]).join('\n')||'Geen logregels in deze bron.'}
-function actions(s){$('serviceLinks').innerHTML=Object.entries(s.links||{}).map(([n,u])=>`<a href="${esc(u)}" target="_blank" rel="noreferrer">${esc(n)}</a>`).join('');const buttons=[['run-verifier','Verifier draaien'],['run-periodic','Periodic search'],['run-watchdog','Mountcontrole']];for(const c of s.containers)buttons.push([`restart-container|${c.name}`,`Herstart ${c.name}`]);$('actions').innerHTML=buttons.map(([a,l])=>{const[x,t]=a.split('|');return`<button data-action="${x}" data-target="${esc(t||'')}" data-confirm="${x==='restart-container'||x==='run-watchdog'?'Deze beheeractie uitvoeren?':''}">${esc(l)}</button>`}).join('')}
-function openDetail(kind){const s=state.snapshot,title=$('modalTitle'),body=$('modalBody');title.textContent=({queues:'Queue-details',mount:'Mount read-tests',providers:'Providers',repairs:'Repairs',incidents:'Incidenten',trends:'Historie'}[kind]||'Statusdetails');let rows=[];if(kind==='queues')for(const k of ['sonarr','radarr','nzbdav'])for(const r of (s.queues[k].records||s.queues[k].rows||[]))rows.push([k,r.state,r.title||'–',r.progress===null?'–':`${Math.round(r.progress)}%`,r.ageMinutes===null?'–':`${r.ageMinutes} min`,r.eta||'–']);else if(kind==='mount')rows=Object.entries(s.mounts.checks||{}).map(([k,v])=>[k,label(v.status),`${v.latencyMs} ms`,v.error||'OK',when(v.checkedAt)]);else if(kind==='providers')rows=s.providers.map(p=>[p.name,label(p.status),p.trips,p.missingArticles,p.source]);else if(kind==='incidents')rows=[...s.incidents.active,...s.incidents.historical].map(i=>[label(i.active?'incident':'healthy'),i.title,i.source,when(i.firstSeen),when(i.lastSeen),i.advice]);else rows=[[kind,'Zie het betreffende dashboardblok.']];body.innerHTML=rows.length?`<table class="detail-table">${rows.map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</table>`:'<p class="muted">Geen details beschikbaar.</p>';$('detailModal').showModal()}
-async function runAction(action,target,confirmText){if(state.busy||confirmText&&!confirm(confirmText))return;state.busy=true;$('actionStatus').textContent='Actie wordt uitgevoerd…';try{const r=await fetch('/api/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action,target})}),v=await r.json();$('actionStatus').textContent=v.message||v.error||(v.ok?'Gestart':'Mislukt');if(v.ok)await load(true)}catch(e){$('actionStatus').textContent=`Fout: ${e.message}`}finally{state.busy=false}}
-$('themeSelect').value=localStorage.getItem('arr-theme')||'auto';$('themeSelect').addEventListener('change',e=>{document.documentElement.dataset.theme=e.target.value;localStorage.setItem('arr-theme',e.target.value)});$('refreshBtn').addEventListener('click',()=>load(true));$('logSelect').addEventListener('change',e=>{state.logType=e.target.value;logs(state.snapshot)});$('exportBtn').addEventListener('click',()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(state.snapshot,null,2)],{type:'application/json'}));a.download=`arr-health-${Date.now()}.json`;a.click();URL.revokeObjectURL(a.href)});document.addEventListener('click',e=>{const tab=e.target.closest('[data-incident-tab]');if(tab){state.incidentTab=tab.dataset.incidentTab;incidents(state.snapshot)}const d=e.target.closest('[data-detail]');if(d)openDetail(d.dataset.detail);const a=e.target.closest('[data-action]');if(a)runAction(a.dataset.action,a.dataset.target,a.dataset.confirm)});$('modalClose').addEventListener('click',()=>$('detailModal').close());load(true);setInterval(()=>load(false),60000);
+import { TABS, calculateTabBadges, incidentTab, selectCriticalBanner, tabFromHash } from './dashboard-ui.js';
+
+const state = { snapshot: null, incidentTab: 'active', logType: 'verifier', busy: false, pendingDetail: null };
+const $ = (id) => document.getElementById(id);
+const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
+const number = (value) => value === null || value === undefined || !Number.isFinite(Number(value)) ? '–' : new Intl.NumberFormat('nl-NL').format(value);
+const when = (value) => { if (!value) return 'Onbekend'; const date = new Date(value); return Number.isNaN(+date) ? 'Onbekend' : date.toLocaleString('nl-NL', { dateStyle: 'short', timeStyle: 'short' }); };
+const bytes = (value) => { let size = Number(value || 0); let unit = 0; const units = ['B', 'KB', 'MB', 'GB', 'TB']; while (size >= 1024 && unit < 4) { size /= 1024; unit += 1; } return `${size.toLocaleString('nl-NL', { maximumFractionDigits: unit ? 1 : 0 })} ${units[unit]}`; };
+const label = (value) => ({ healthy: 'Gezond', degraded: 'Degraded', incident: 'Incident', unknown: 'Onbekend', active: 'Actief' })[value] || value || 'Onbekend';
+
+function safe(object, path, fallback = null) {
+  return path.split('.').reduce((value, key) => value?.[key], object) ?? fallback;
+}
+
+function row(title, note, value, status = 'unknown', detail = '') {
+  const tag = detail ? 'button' : 'div';
+  return `<${tag} class="stack-row ${esc(status)}" ${detail ? `type="button" data-detail="${esc(detail)}"` : ''}><div class="copy"><strong>${esc(title)}</strong><p>${esc(note)}</p></div><span class="badge ${esc(status)}">${esc(value)}</span></${tag}>`;
+}
+
+function renderTabs() {
+  const active = tabFromHash(location.hash);
+  const badges = calculateTabBadges(state.snapshot || {});
+  $('mainTabs').innerHTML = TABS.map((tab) => {
+    const selected = tab.id === active.id;
+    const badge = badges[tab.id];
+    const suffix = badge.count ? `, ${badge.count} actieve ${badge.severity === 'critical' ? 'problemen' : 'waarschuwingen'}` : '';
+    return `<button id="tab-${tab.id}" class="main-tab${selected ? ' active' : ''}" type="button" role="tab" aria-selected="${selected}" aria-controls="${tab.panelId}" aria-label="${tab.label}${suffix}" tabindex="${selected ? 0 : -1}" data-main-tab="${tab.id}"><span>${tab.label}</span>${badge.count ? `<span class="tab-badge ${badge.severity}" aria-hidden="true">${badge.count}</span>` : ''}</button>`;
+  }).join('');
+  for (const tab of TABS) $(tab.panelId).hidden = tab.id !== active.id;
+  requestAnimationFrame(() => document.getElementById(`tab-${active.id}`)?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'auto' }));
+}
+
+function activateTab(id, options = {}) {
+  const tab = TABS.find((item) => item.id === id) || TABS[0];
+  if (options.detail) state.pendingDetail = options.detail;
+  if (location.hash !== tab.hash) location.hash = tab.hash;
+  else {
+    renderTabs();
+    if (state.pendingDetail) { const detail = state.pendingDetail; state.pendingDetail = null; requestAnimationFrame(() => openDetail(detail)); }
+  }
+  if (options.closeModal !== false && $('detailModal').open) $('detailModal').close();
+}
+
+async function load(force = false) {
+  $('refreshBtn').disabled = true;
+  try {
+    const response = await fetch(`/api/snapshot${force ? '?force=1' : ''}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    state.snapshot = await response.json();
+    render();
+  } catch (error) {
+    $('lastUpdated').textContent = `Niet beschikbaar · ${error.message}`;
+    $('headerStatus').className = 'badge incident';
+    $('headerStatus').textContent = 'Offline';
+    renderTabs();
+  } finally { $('refreshBtn').disabled = false; }
+}
+
+function render() {
+  const snapshot = state.snapshot;
+  $('lastUpdated').textContent = `Bijgewerkt ${when(snapshot.generatedAt)}`;
+  $('headerStatus').className = `badge ${safe(snapshot, 'overview.status', 'unknown')}`;
+  $('headerStatus').textContent = label(safe(snapshot, 'overview.status', 'unknown'));
+  renderTabs(); renderBanner(snapshot); summary(snapshot); recommendation(snapshot); incidents(snapshot); chain(snapshot); trends(snapshot);
+  queues(snapshot); wanted(snapshot); repairs(snapshot); providers(snapshot); providerIncidents(snapshot); providerTrends(snapshot);
+  containers(snapshot); systemChecks(snapshot); usage(snapshot); logs(snapshot); actions(snapshot);
+}
+
+function renderBanner(snapshot) {
+  const banner = selectCriticalBanner(snapshot);
+  $('criticalBanner').hidden = !banner;
+  $('criticalBanner').innerHTML = banner ? `<button type="button" data-banner-tab="${banner.tab}" data-banner-detail="${banner.detail}"><span class="banner-icon" aria-hidden="true">!</span><span><strong>${esc(banner.title)}</strong><small>${esc(banner.source)} · ${esc(banner.action)}</small></span><span aria-hidden="true">›</span></button>` : '';
+}
+
+function summary(snapshot) {
+  const queues = ['sonarr', 'radarr', 'nzbdav'].reduce((sum, key) => sum + Number(safe(snapshot, `queues.${key}.total`, 0)), 0);
+  const stuck = Number(safe(snapshot, 'overview.failedQueues', 0)) + Number(safe(snapshot, 'overview.stalledQueues', 0));
+  const provider = (snapshot.providers || []).some((item) => item.status === 'degraded') ? 'degraded' : snapshot.providers?.length ? 'healthy' : 'unknown';
+  const cards = [
+    ['Algemene status', label(safe(snapshot, 'overview.status', 'unknown')), `${number(safe(snapshot, 'overview.activeProblems', 0))} actieve signalen`, safe(snapshot, 'overview.status', 'unknown'), 'overview', 'incidents'],
+    ['Queue-items', number(queues), stuck ? `${stuck} vastgelopen/failed` : queues ? 'Normale activiteit' : 'Queue is leeg', stuck ? 'degraded' : queues ? 'active' : 'healthy', 'downloads', 'queues'],
+    ['Providerstatus', label(provider), snapshot.providers?.length ? 'Afgeleid uit recente logs' : 'Onvoldoende gegevens', provider, 'providers', 'providers'],
+    ['WebDAV-mount', label(safe(snapshot, 'mounts.overall', 'unknown')), `${number(safe(snapshot, 'mounts.maxLatencyMs'))} ms read-latency`, safe(snapshot, 'mounts.overall', 'unknown'), 'system', 'mount']
+  ];
+  $('summaryGrid').innerHTML = cards.map(([name, value, note, status, tab, detail]) => `<button class="status-card ${status}" type="button" data-goto-tab="${tab}" data-goto-detail="${detail}"><span class="badge ${status}">${label(status)}</span><span class="value">${esc(value)}</span><strong>${esc(name)}</strong><small>${esc(note)}</small><time>Laatste meting ${when(snapshot.generatedAt)}</time></button>`).join('');
+}
+
+function recommendation(snapshot) {
+  const critical = selectCriticalBanner(snapshot);
+  const active = snapshot.incidents?.active?.[0];
+  $('recommendationTitle').textContent = critical?.title || active?.title || 'Geen actie nodig';
+  $('recommendationText').textContent = critical?.action || active?.advice || 'Alle gecontroleerde onderdelen zijn rustig. Blijf de automatische metingen volgen.';
+}
+
+function incidents(snapshot) {
+  document.querySelectorAll('[data-incident-tab]').forEach((button) => button.classList.toggle('active', button.dataset.incidentTab === state.incidentTab));
+  const list = snapshot.incidents?.[state.incidentTab] || [];
+  $('incidentList').innerHTML = list.length ? list.slice(0, 20).map((item) => row(item.title, `${item.advice || 'Geen advies'} · ${item.source || 'Onbekende bron'} · ${number(item.count)}× · laatst ${when(item.lastSeen)}`, item.active ? 'Actief' : 'Opgelost', item.active ? item.severity === 'critical' ? 'incident' : 'degraded' : 'healthy')).join('') : row(state.incidentTab === 'active' ? 'Geen actieve incidenten' : 'Geen items', state.incidentTab === 'active' ? 'De keten heeft nu geen actieve log-afgeleide storing.' : snapshot.incidents?.rules || 'Geen historie.', 'Rustig', 'healthy');
+}
+
+function chain(snapshot) {
+  $('chain').innerHTML = (snapshot.chain || []).map((node) => `<div class="chain-node ${esc(node.status || 'unknown')}"><span class="badge ${esc(node.status || 'unknown')}">${label(node.status)}</span><strong>${esc(node.label)}</strong><small>${node.latencyMs !== null && node.latencyMs !== undefined ? `${number(node.latencyMs)} ms` : node.problem ? esc(node.problem) : node.lastSuccess ? `OK ${when(node.lastSuccess)}` : 'Geen betrouwbare check'}</small></div>`).join('') || row('Geen ketendata', 'De mediaketen kon niet worden opgebouwd.', 'Onbekend', 'unknown');
+}
+
+function spark(points, getter) {
+  const values = (points || []).map(getter).map(Number).filter(Number.isFinite);
+  if (values.length < 2) return '<p class="muted empty-chart">Historie wordt opgebouwd</p>';
+  const low = Math.min(...values); const high = Math.max(...values); const range = high - low || 1;
+  const polyline = values.map((value, index) => `${(index / (values.length - 1)) * 100},${58 - ((value - low) / range) * 52}`).join(' ');
+  return `<svg class="spark" viewBox="0 0 100 60" preserveAspectRatio="none" aria-hidden="true"><polyline points="${polyline}"/></svg>`;
+}
+
+function trendCards(points, all, definitions) {
+  return definitions.map(([name, getter]) => `<div class="trend-card"><div class="trend-head"><strong>${name}</strong><span class="muted">${number(getter(points.at(-1) || {}))}</span></div>${spark(points, getter)}<p class="muted">24 uur · ${all.length} samples in 7 dagen</p></div>`).join('');
+}
+
+function trends(snapshot) {
+  const points = snapshot.history?.points24h || []; const all = snapshot.history?.points7d || [];
+  $('trends').innerHTML = trendCards(points, all, [['Queue totaal', (point) => Object.values(point.queue || {}).reduce((sum, queue) => sum + Number(queue.total || 0), 0)], ['Actieve incidenten', (point) => Object.values(point.incidents || {}).reduce((sum, value) => sum + Number(value || 0), 0)], ['Mount latency', (point) => point.mount?.latencyMs]]);
+  $('downloadTrends').innerHTML = trendCards(points, all, [['Queue totaal', (point) => Object.values(point.queue || {}).reduce((sum, queue) => sum + Number(queue.total || 0), 0)], ['Vastgelopen', (point) => Object.values(point.queue || {}).reduce((sum, queue) => sum + Number(queue.stalled || 0), 0)], ['Failed', (point) => Object.values(point.queue || {}).reduce((sum, queue) => sum + Number(queue.failed || 0), 0)]]);
+  $('historyMeta').textContent = `Elke ${number(snapshot.history?.sampleMinutes)} min · ${number(snapshot.history?.retentionDays)} dagen retentie`;
+}
+
+function queues(snapshot) {
+  $('queues').innerHTML = ['sonarr', 'radarr', 'nzbdav'].map((key) => { const queue = snapshot.queues?.[key] || {}; const status = !queue.ok ? 'unknown' : queue.failed ? 'incident' : queue.stalled ? 'degraded' : queue.total ? 'active' : 'healthy'; return row(key === 'nzbdav' ? 'InfiniDysk' : key[0].toUpperCase() + key.slice(1), queue.ok ? `${number(queue.active)} actief · ${number(queue.stalled)} stil · oudste ${number(queue.oldestMinutes || 0)} min` : 'Bron niet bereikbaar', `${number(queue.total || 0)} items`, status, 'queues'); }).join('');
+}
+
+function wanted(snapshot) {
+  const items = [['Sonarr missing', safe(snapshot, 'wanted.sonarr.missing')], ['Sonarr cutoff unmet', safe(snapshot, 'wanted.sonarr.cutoff')], ['Radarr missing', safe(snapshot, 'wanted.radarr.missing')], ['Radarr cutoff unmet', safe(snapshot, 'wanted.radarr.cutoff')]];
+  $('wanted').innerHTML = items.map(([name, value]) => row(name, value === null ? 'Bron niet bereikbaar' : value === 0 ? 'Geen backlog' : 'Monitored backlog; leeftijd niet beschikbaar', number(value), value === null ? 'unknown' : value === 0 ? 'healthy' : 'active')).join('');
+}
+
+function repairs(snapshot) {
+  const repair = snapshot.repairs?.summary || {}; const counts = snapshot.periodic?.counts || {};
+  const searches = ['sonarr_missing', 'sonarr_upgrade', 'radarr_missing', 'radarr_upgrade'].reduce((sum, key) => sum + Number(counts[key] || 0), 0);
+  $('repairs').innerHTML = row('Verifier', `${number(repair.clean || 0)} schone runs · ${number(repair.succeeded || 0)} runs met geslaagde repairs`, `${number(repair.repairs || 0)} repairs`, repair.repairs ? 'healthy' : 'unknown', 'repairs') + row('Periodic searches', `${number(counts.radarr_missing_backoff || 0)} backoffs · huidige logsnapshot`, number(searches), searches ? 'active' : 'healthy');
+}
+
+function providers(snapshot) {
+  $('providers').innerHTML = snapshot.providers?.length ? snapshot.providers.map((provider) => row(provider.name, `${number(provider.trips)} trips · ${number(provider.missingArticles)} missing articles · ${provider.period || 'onbekende periode'} · laatste trip ${when(provider.lastTrip)}`, label(provider.status), provider.status, 'providers')).join('') : row('Geen providerdata', 'Sunny, Viper en andere providers worden alleen getoond als echte logdata aanwezig is.', 'Onbekend', 'unknown');
+}
+
+function providerIncidents(snapshot) {
+  const list = (snapshot.incidents?.active || []).filter((item) => incidentTab(item) === 'providers');
+  $('providerIncidents').innerHTML = list.length ? list.map((item) => row(item.title, `${item.source || 'Onbekende bron'} · ${item.advice || 'Geen advies'} · laatst ${when(item.lastSeen)}`, label(item.severity === 'critical' ? 'incident' : 'degraded'), item.severity === 'critical' ? 'incident' : 'degraded')).join('') : row('Geen actieve providerincidenten', 'Geen recente trips, timeouts of missing-articlewaarschuwingen.', 'Rustig', 'healthy');
+}
+
+function providerTrends(snapshot) {
+  const points = snapshot.history?.points24h || []; const all = snapshot.history?.points7d || [];
+  const getter = (point) => ['provider-trip', 'single-provider', 'missing-articles'].reduce((sum, key) => sum + Number(point.incidents?.[key] || 0), 0);
+  $('providerTrends').innerHTML = points.some((point) => getter(point) > 0) ? trendCards(points, all, [['Providerincidenten', getter]]) : '<p class="muted">Nog onvoldoende betrouwbare providerhistorie voor een trend.</p>';
+}
+
+function containers(snapshot) {
+  $('containers').innerHTML = (snapshot.containers || []).map((container) => { const status = !container.ok ? 'incident' : container.health && container.health !== 'healthy' ? 'degraded' : 'healthy'; return row(container.name, `Docker ${container.status || 'unknown'} · health ${container.health || 'niet ingesteld'} · gestart ${when(container.startedAt)}`, `${number(container.restartCount)} restarts`, status); }).join('') || row('Geen containerdata', 'Docker is niet bereikbaar of er zijn geen containers geconfigureerd.', 'Onbekend', 'unknown');
+}
+
+function systemChecks(snapshot) {
+  const healthRows = ['sonarr', 'radarr'].map((key) => { const health = snapshot.health?.[key] || {}; return row(`${key[0].toUpperCase() + key.slice(1)} API`, health.reachable ? `HTTP ${number(health.status)} · gecontroleerd ${when(health.checkedAt)}` : 'API niet bereikbaar', `${number(health.latencyMs)} ms`, health.reachable ? health.ok ? 'healthy' : 'degraded' : 'incident'); });
+  const mountRows = Object.entries(snapshot.mounts?.checks || {}).map(([name, check]) => row(name, `${check.error || 'Read-test geslaagd'} · gecontroleerd ${when(check.checkedAt)}`, `${number(check.latencyMs)} ms`, check.status || 'unknown', 'mount'));
+  $('systemChecks').innerHTML = [...healthRows, ...mountRows].join('') || row('Geen systeemchecks', 'Optionele brondata ontbreekt.', 'Onbekend', 'unknown');
+}
+
+function usage(snapshot) {
+  const periods = snapshot.usage?.periods || {};
+  $('usage').innerHTML = [['Vandaag', periods.daily], ['Week', periods.weekly], ['Maand', periods.monthly], ['Jaar', periods.yearly], ['Dashboard totaal', periods.allTime]].map(([name, value]) => `<div class="usage-card"><span>${name}</span><strong>${bytes(value?.totalBytes)}</strong><span>in ${bytes(value?.rxBytes)} · uit ${bytes(value?.txBytes)}</span></div>`).join('');
+}
+
+function logs(snapshot) { $('logBox').textContent = (snapshot.logs?.[state.logType] || []).join('\n') || 'Geen logregels in deze bron.'; }
+
+function actions(snapshot) {
+  $('serviceLinks').innerHTML = Object.entries(snapshot.links || {}).map(([name, url]) => `<a href="${esc(url)}" target="_blank" rel="noreferrer">${esc(name)}</a>`).join('') || '<span class="muted">Geen servicelinks geconfigureerd.</span>';
+  const buttons = [['run-verifier', 'Verifier draaien'], ['run-periodic', 'Periodic search'], ['run-watchdog', 'Mountcontrole']];
+  for (const container of snapshot.containers || []) buttons.push([`restart-container|${container.name}`, `Herstart ${container.name}`]);
+  $('actions').innerHTML = buttons.map(([value, text]) => { const [action, target] = value.split('|'); return `<button type="button" data-action="${action}" data-target="${esc(target || '')}" data-confirm="${action === 'restart-container' || action === 'run-watchdog' ? 'Deze beheeractie uitvoeren?' : ''}">${esc(text)}</button>`; }).join('');
+}
+
+function openDetail(kind) {
+  if (!state.snapshot) return;
+  const snapshot = state.snapshot; const title = $('modalTitle'); let rows = [];
+  title.textContent = ({ queues: 'Queue-details', mount: 'Mount read-tests', providers: 'Providers', repairs: 'Repairs', incidents: 'Incidenten', trends: 'Historie' })[kind] || 'Statusdetails';
+  if (kind === 'queues') for (const key of ['sonarr', 'radarr', 'nzbdav']) for (const item of snapshot.queues?.[key]?.records || snapshot.queues?.[key]?.rows || []) rows.push([key, item.state, item.title || '–', item.progress === null ? '–' : `${Math.round(item.progress)}%`, item.ageMinutes === null ? '–' : `${item.ageMinutes} min`, item.eta || '–']);
+  else if (kind === 'mount') rows = Object.entries(snapshot.mounts?.checks || {}).map(([key, value]) => [key, label(value.status), `${number(value.latencyMs)} ms`, value.error || 'OK', when(value.checkedAt)]);
+  else if (kind === 'providers') rows = (snapshot.providers || []).map((item) => [item.name, label(item.status), item.trips, item.missingArticles, item.source]);
+  else if (kind === 'incidents') rows = [...(snapshot.incidents?.active || []), ...(snapshot.incidents?.historical || [])].map((item) => [label(item.active ? 'incident' : 'healthy'), item.title, item.source, when(item.firstSeen), when(item.lastSeen), item.advice]);
+  else if (kind === 'repairs') rows = (snapshot.repairs?.runs || []).map((run) => [when(run.started), `${number(run.repairs)} repairs`, `${number(run.streamChecks)} checks`, when(run.ended)]);
+  $('modalBody').innerHTML = rows.length ? `<div class="table-scroll"><table class="detail-table"><tbody>${rows.map((cells) => `<tr>${cells.map((cell) => `<td>${esc(cell)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '<p class="muted">Geen details beschikbaar.</p>';
+  $('detailModal').showModal();
+}
+
+async function runAction(action, target, confirmText) {
+  if (state.busy || (confirmText && !confirm(confirmText))) return;
+  state.busy = true; $('actionStatus').textContent = 'Actie wordt uitgevoerd…';
+  try { const response = await fetch('/api/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, target }) }); const value = await response.json(); $('actionStatus').textContent = value.message || value.error || (value.ok ? 'Gestart' : 'Mislukt'); if (value.ok) await load(true); }
+  catch (error) { $('actionStatus').textContent = `Fout: ${error.message}`; }
+  finally { state.busy = false; }
+}
+
+function handleTabKeydown(event) {
+  const current = event.target.closest('[data-main-tab]'); if (!current) return;
+  const index = TABS.findIndex((tab) => tab.id === current.dataset.mainTab); let next = index;
+  if (event.key === 'ArrowRight') next = (index + 1) % TABS.length; else if (event.key === 'ArrowLeft') next = (index - 1 + TABS.length) % TABS.length; else if (event.key === 'Home') next = 0; else if (event.key === 'End') next = TABS.length - 1; else if (event.key !== 'Enter' && event.key !== ' ') return;
+  event.preventDefault(); const target = (event.key === 'Enter' || event.key === ' ') ? current.dataset.mainTab : TABS[next].id; activateTab(target); requestAnimationFrame(() => document.getElementById(`tab-${target}`)?.focus());
+}
+
+function handleHashChange() {
+  const active = tabFromHash(location.hash);
+  if (location.hash.toLowerCase() !== active.hash) history.replaceState(null, '', active.hash);
+  renderTabs();
+  if (state.pendingDetail) { const detail = state.pendingDetail; state.pendingDetail = null; requestAnimationFrame(() => openDetail(detail)); }
+}
+
+$('themeSelect').value = localStorage.getItem('arr-theme') || 'auto';
+$('themeSelect').addEventListener('change', (event) => { document.documentElement.dataset.theme = event.target.value; localStorage.setItem('arr-theme', event.target.value); });
+$('refreshBtn').addEventListener('click', () => load(true));
+$('logSelect').addEventListener('change', (event) => { state.logType = event.target.value; if (state.snapshot) logs(state.snapshot); });
+$('exportBtn').addEventListener('click', () => { if (!state.snapshot) return; const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([JSON.stringify(state.snapshot, null, 2)], { type: 'application/json' })); link.download = `arr-health-${Date.now()}.json`; link.click(); URL.revokeObjectURL(link.href); });
+$('mainTabs').addEventListener('keydown', handleTabKeydown);
+window.addEventListener('hashchange', handleHashChange);
+document.addEventListener('click', (event) => {
+  const mainTab = event.target.closest('[data-main-tab]'); if (mainTab) { activateTab(mainTab.dataset.mainTab); return; }
+  const banner = event.target.closest('[data-banner-tab]'); if (banner) { activateTab(banner.dataset.bannerTab, { detail: banner.dataset.bannerDetail }); return; }
+  const destination = event.target.closest('[data-goto-tab]'); if (destination) { activateTab(destination.dataset.gotoTab, { detail: destination.dataset.gotoDetail }); return; }
+  const incidentButton = event.target.closest('[data-incident-tab]'); if (incidentButton) { state.incidentTab = incidentButton.dataset.incidentTab; incidents(state.snapshot); return; }
+  const detail = event.target.closest('[data-detail]'); if (detail) { openDetail(detail.dataset.detail); return; }
+  const action = event.target.closest('[data-action]'); if (action) runAction(action.dataset.action, action.dataset.target, action.dataset.confirm);
+});
+$('modalClose').addEventListener('click', () => $('detailModal').close());
+handleHashChange(); load(true); setInterval(() => load(false), 60000);

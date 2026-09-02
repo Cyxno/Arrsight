@@ -60,6 +60,23 @@ Per betrouwbaar controleerbaar onderdeel toont het dashboard bereikbaarheid, res
 
 ## Belangrijkste mogelijkheden
 
+### Vier gerichte hoofdtabbladen
+
+De interface gebruikt vier hoofdtabbladen, zodat de dagelijkse controle compact blijft en technische details alleen zichtbaar zijn wanneer ze nodig zijn:
+
+- **Overzicht** — beslissingskaarten, aanbevolen vervolgstap, actieve incidenten, mediaketen en belangrijkste trends.
+- **Downloads** — Sonarr-, Radarr- en InfiniDysk-queues, wanted/cutoff unmet, repairs, periodic searches en downloadtrends.
+- **Providers** — dynamisch aangetroffen providers, trips, missing articles, actieve providerincidenten en alleen bij voldoende historie een trend.
+- **Systeem** — Dockercontainers, restart counts, API-bereikbaarheid, WebDAV-readchecks, dataverbruik, logs, servicelinks en handmatige acties.
+
+De URL-hash is de route en maakt elk tabblad bookmarkbaar: `#overview`, `#downloads`, `#providers` en `#system`. Zonder of met een onbekende hash opent Overzicht. Terug/vooruit en refresh behouden de actieve context; een gewone tabwissel gebruikt de bestaande snapshot en doet geen extra API-request.
+
+Tabbadges verschijnen alleen bij actuele aandachtspunten. Normale downloadactiviteit blijft informatief en badgevrij; failed/stalled queues, providerincidenten, onbereikbare services, unhealthy containers en mountproblemen tellen wel mee. De Overzicht-badge dedupliceert incidenten op hun stabiele fingerprint.
+
+Een kritiek actief incident verschijnt onder de globale navigatie als klikbare banner met bron en aanbevolen actie. De banner opent direct het passende tabblad en waar mogelijk het relevante detailvenster.
+
+Op mobiel is de tabbar horizontaal scrollbaar en blijft de actieve tab in beeld. Met het toetsenbord werken Tab, Enter, Spatie, pijl links/rechts, Home en End. De tabs en panelen gebruiken de bijbehorende ARIA-rollen en relaties; badgetellingen zijn in de toegankelijke tabnaam opgenomen.
+
 ### Incidenten met een levenscyclus
 
 Logsignalen krijgen een stabiele fingerprint, categorie, severity, first/last seen, telling en advies. Een oude foutregel blijft niet eindeloos rood:
