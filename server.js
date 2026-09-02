@@ -2,13 +2,15 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildIncidents, classifyOverview, classifyQueue, metricPoint, pruneHistory, trend } from './lib/telemetry.js';
+import { buildAttentionItems, buildIncidents, classifyOverview, classifyQueue, deriveProviders, metricPoint, parseOperationalHistory, pruneHistory, reconcileIncidentHistory, trend, verifierSummary } from './lib/telemetry.js';
+import { runMountReadTest, updateMountState } from './lib/mount-check.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
 const configPath = path.join(__dirname, 'config.json');
 const usageHistoryPath = path.join(__dirname, 'usage-history.json');
 const metricsHistoryPath = path.join(__dirname, 'metrics-history.json');
+const incidentHistoryPath = path.join(__dirname, 'incidents-history.json');
 const usageMaxAttributionMs = 15 * 60 * 1000;
 
 const defaultConfig = {
@@ -39,7 +41,7 @@ const defaultConfig = {
   },
   dockerSocket: '/var/run/docker.sock',
   containers: ['InfiniDysk', 'binhex-sonarr', 'binhex-radarr', 'bazarr', 'binhex-plexpass'],
-  monitoring: { sampleMinutes: 5, retentionDays: 90, queueStaleMinutes: 30, queueFailedMinutes: 120, mountWarnMs: 1500, mountTimeoutMs: 5000 }
+  monitoring: { sampleMinutes: 5, retentionDays: 90, resolvedHours: 72, queueStaleMinutes: 30, queueFailedMinutes: 120, mountWarnMs: 1500, mountTimeoutMs: 5000 }
 };
 
 let config = defaultConfig;
@@ -47,8 +49,25 @@ let lastSnapshot = null;
 let lastSnapshotAt = 0;
 let usageWriteQueue = Promise.resolve();
 let metricsWriteQueue = Promise.resolve();
+let incidentWriteQueue = Promise.resolve();
 let measurementRunning = false;
 let actionRunning = false;
+let snapshotBuildPromise = null;
+
+async function readIncidentHistory() {
+  try {
+    return parseOperationalHistory(await fs.readFile(incidentHistoryPath, 'utf8'));
+  } catch { return parseOperationalHistory(''); }
+}
+
+async function writeIncidentHistory(history) {
+  incidentWriteQueue = incidentWriteQueue.then(async () => {
+    const temporary = `${incidentHistoryPath}.${process.pid}.tmp`;
+    await fs.writeFile(temporary, `${JSON.stringify(history)}\n`, { mode: 0o600 });
+    await fs.rename(temporary, incidentHistoryPath);
+  }).catch((error) => console.error('Incident history write failed:', error.message));
+  return incidentWriteQueue;
+}
 
 async function loadConfig() {
   try {
@@ -191,12 +210,14 @@ async function recordMetrics(snapshot) {
     await writeMetricsHistory(history);
   }
   const queueTotal = (point) => Object.values(point.queue || {}).reduce((sum, queue) => sum + Number(queue.total || 0), 0);
+  const problemScore = (point) => Number(point.problemScore || Object.values(point.queue || {}).reduce((sum, queue) => sum + Number(queue.failed || 0) * 3 + Number(queue.stalled || 0), 0));
   return {
     retentionDays: config.monitoring.retentionDays,
     sampleMinutes: config.monitoring.sampleMinutes,
     points24h: history.points.filter((p) => Date.now() - new Date(p.at).getTime() <= 86400000),
     points7d: history.points.filter((p) => Date.now() - new Date(p.at).getTime() <= 7 * 86400000),
-    queueTrend: trend(history.points, queueTotal)
+    activityTrend: trend(history.points, queueTotal),
+    problemTrend: trend(history.points, problemScore)
   };
 }
 
@@ -391,6 +412,7 @@ function parseVerifier(lines) {
     if (/^(sonarr|radarr)_missing_deferred /.test(line) && current) current.deferred += 1;
     if (/^(sonarr|radarr)_missing_confirmed /.test(line) && current) current.confirmedMissing += 1;
     if (/^nzbdav_log_unmapped /.test(line) && current) current.unmapped += 1;
+    if (/verifier (?:failed|error)|fatal/i.test(line) && current) current.failed = true;
     const done = line.match(/^== ([^ ]+) Arr file integrity verifier done repairs=(\d+) stream_checks=(\d+) ==/);
     if (done) {
       const run = current || {};
@@ -401,6 +423,7 @@ function parseVerifier(lines) {
       current = null;
     }
   }
+  if (current) runs.push({ ...current, status: current.failed ? 'failed' : 'running' });
   return { runs: runs.slice(-24), repairs: repairs.slice(-100) };
 }
 
@@ -687,27 +710,22 @@ async function arrHealth(app) {
   return { app, reachable: result.ok, ok: result.ok && Array.isArray(result.data) && result.data.length === 0, status: result.status, latencyMs: Math.round(performance.now() - started), checkedAt: new Date().toISOString(), data: result.data || result.error };
 }
 
-function providerPerformance(attention) {
-  const lines = attention.recent || [];
-  const names = ['Sunny', 'Viper'];
-  return names.map((name) => {
-    const related = lines.filter((event) => new RegExp(name, 'i').test(`${event.line} ${event.subject}`));
-    const trips = related.filter((event) => event.id === 'provider-trip');
-    const missing = related.filter((event) => event.id === 'missing-articles');
-    const lastTrip = trips.at(-1)?.observedAt || null;
-    return { name, status: trips.length ? 'degraded' : related.length ? 'healthy' : 'unknown', trips: trips.length, missingArticles: missing.length, lastTrip, source: 'afgeleid uit recente logregels', period: 'huidige logsnapshot' };
-  }).filter((provider) => provider.status !== 'unknown' || lines.some((event) => new RegExp(provider.name, 'i').test(event.line)));
+function providerPerformance(attention, incidents, now = new Date()) {
+  return deriveProviders(attention.recent || [], incidents || [], now, 24);
 }
 
 function buildChain(snapshot) {
   const node = (id, label, status, latencyMs, lastSuccess, problem = null) => ({ id, label, status, latencyMs, lastSuccess, problem });
+  const plex = snapshot.containers.find((container) => /plex/i.test(container.name));
+  const bazarrContainer = snapshot.containers.find((container) => /bazarr/i.test(container.name));
   return [
     node('arr', 'Sonarr / Radarr', snapshot.health.sonarr.reachable && snapshot.health.radarr.reachable ? (snapshot.health.sonarr.ok && snapshot.health.radarr.ok ? 'healthy' : 'degraded') : 'incident', Math.max(snapshot.health.sonarr.latencyMs || 0, snapshot.health.radarr.latencyMs || 0), snapshot.health.sonarr.reachable && snapshot.health.radarr.reachable ? snapshot.generatedAt : null),
     node('provider', 'Usenet-provider', snapshot.providers.some((p) => p.status === 'degraded') ? 'degraded' : snapshot.providers.length ? 'healthy' : 'unknown', null, null, snapshot.providers.find((p) => p.status === 'degraded')?.name || null),
     node('infinidysk', 'InfiniDysk', snapshot.queues.nzbdav.ok ? (snapshot.queues.nzbdav.failed ? 'incident' : 'healthy') : 'incident', null, snapshot.queues.nzbdav.ok ? snapshot.generatedAt : null),
     node('mount', 'WebDAV-mount', snapshot.mounts.overall, snapshot.mounts.maxLatencyMs, snapshot.mounts.lastKnownGood),
     node('library', 'Import / library', !snapshot.queues.sonarr.ok || !snapshot.queues.radarr.ok ? 'unknown' : snapshot.queues.sonarr.failed + snapshot.queues.radarr.failed ? 'incident' : snapshot.queues.sonarr.stalled + snapshot.queues.radarr.stalled ? 'degraded' : 'healthy', null, snapshot.queues.sonarr.ok && snapshot.queues.radarr.ok ? snapshot.generatedAt : null),
-    node('bazarr', 'Bazarr', snapshot.bazarr.ok ? 'healthy' : 'unknown', null, snapshot.bazarr.ok ? snapshot.generatedAt : null)
+    node('bazarr', 'Bazarr', snapshot.bazarr.ok ? 'healthy' : bazarrContainer && !bazarrContainer.ok ? 'incident' : 'unknown', null, snapshot.bazarr.ok ? snapshot.generatedAt : null, snapshot.bazarr.ok ? null : 'API niet bevestigd'),
+    node('plex', 'Plex-container', !plex ? 'unknown' : plex.ok && plex.health !== 'unhealthy' ? 'healthy' : 'incident', null, plex?.ok ? snapshot.generatedAt : null, !plex ? 'Niet geconfigureerd' : plex.ok ? null : 'Container niet actief')
   ];
 }
 
@@ -715,7 +733,7 @@ async function arrQueue(app) {
   const base = config[app];
   const result = await fetchJson(`${base.url}/api/v3/queue?apikey=${encodeURIComponent(base.apiKey)}&page=1&pageSize=1000`);
   const records = result.ok ? (result.data.records || []) : [];
-  const classified = classifyQueue(records, new Date(), config.monitoring.queueStaleMinutes, config.monitoring.queueFailedMinutes);
+  const classified = classifyQueue(records, new Date(), config.monitoring.queueStaleMinutes, config.monitoring.queueFailedMinutes, app);
   return { app, ok: result.ok, byStatus: groupBy(records, (r) => r.status || 'unknown'), ...classified, records: classified.rows.slice(0, 50) };
 }
 
@@ -737,7 +755,7 @@ async function wantedCounts(app) {
 async function nzbdavQueue() {
   const result = await fetchJson(`${config.nzbdav.url}/api?mode=queue&output=json&apikey=${encodeURIComponent(config.nzbdav.apiKey)}`);
   const rows = result.ok ? (result.data.queue?.slots || []) : [];
-  const classified = classifyQueue(rows, new Date(), config.monitoring.queueStaleMinutes, config.monitoring.queueFailedMinutes);
+  const classified = classifyQueue(rows, new Date(), config.monitoring.queueStaleMinutes, config.monitoring.queueFailedMinutes, 'nzbdav');
   return { ok: result.ok, byStatus: groupBy(rows, (r) => r.status || 'unknown'), ...classified, rows: classified.rows.slice(0, 50) };
 }
 
@@ -748,20 +766,26 @@ async function bazarrProviders() {
   return { ok: result.ok, providers: result.ok ? (result.data.data || []) : [], error: result.error };
 }
 
-async function dockerContainers() {
+async function dockerContainers(previousRestarts = {}) {
   const containers = [];
+  let reachable = true;
   for (const name of config.containers) {
     const info = await dockerJson(`/containers/${encodeURIComponent(name)}/json`);
+    if (!info.ok && /socket|connect|timeout/i.test(info.error || '')) reachable = false;
+    const restartCount = Number(info.data?.RestartCount || 0);
     containers.push({
       name,
-      ok: info.ok && info.data?.State?.Running,
+      exists: info.ok,
+      ok: Boolean(info.ok && info.data?.State?.Running),
       status: info.data?.State?.Status || info.error || 'unknown',
       health: info.data?.State?.Health?.Status || null,
       startedAt: info.data?.State?.StartedAt || null,
-      restartCount: Number(info.data?.RestartCount || 0)
+      restartCount,
+      restartIncreased: Number.isFinite(previousRestarts[name]) && restartCount > previousRestarts[name],
+      checkedAt: new Date().toISOString()
     });
   }
-  return containers;
+  return { containers, reachable, restartCounts: Object.fromEntries(containers.map((container) => [container.name, container.restartCount])) };
 }
 
 async function dockerLogs(name, sinceSeconds = 86400) {
@@ -843,41 +867,30 @@ function groupBy(rows, fn) {
   return out;
 }
 
-async function mountStatus() {
+async function mountStatus(previous = {}) {
   const targets = { nzbdav: path.join(config.paths.nzbdavMount, 'completed-symlinks'), tvRoot: config.paths.tvRoot, movieRoot: config.paths.movieRoot };
-  const entries = await Promise.all(Object.entries(targets).map(async ([name, target]) => [name, await readTest(target)]));
+  const entries = [];
+  for (const [name, target] of Object.entries(targets)) entries.push([name, await runMountReadTest(target, { timeoutMs: config.monitoring.mountTimeoutMs, warnMs: config.monitoring.mountWarnMs })]);
   const checks = Object.fromEntries(entries);
+  const persisted = updateMountState(previous, checks);
+  for (const [name, check] of Object.entries(checks)) Object.assign(check, persisted[name]);
   const states = Object.values(checks).map((check) => check.status);
   const overall = states.includes('incident') ? 'incident' : states.includes('degraded') ? 'degraded' : states.every((s) => s === 'healthy') ? 'healthy' : 'unknown';
   return {
     ...Object.fromEntries(Object.entries(checks).map(([key, value]) => [key, value.ok])),
     checks, overall, maxLatencyMs: Math.max(0, ...Object.values(checks).map((check) => check.latencyMs || 0)),
-    lastKnownGood: Object.values(checks).every((check) => check.ok) ? new Date().toISOString() : null
+    lastKnownGood: Object.values(checks).map((check) => check.lastKnownGood).filter(Boolean).sort().at(0) || null,
+    state: persisted
   };
 }
 
-async function readTest(target) {
-  const started = performance.now();
-  try {
-    const timeoutMs = Number(config.monitoring.mountTimeoutMs || 5000);
-    await Promise.race([
-      fs.readdir(target, { withFileTypes: true }).then((items) => items.slice(0, 1).map((item) => item.name)),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('read timeout')), timeoutMs))
-    ]);
-    const latencyMs = Math.round(performance.now() - started);
-    return { ok: true, status: latencyMs >= Number(config.monitoring.mountWarnMs || 1500) ? 'degraded' : 'healthy', latencyMs, checkedAt: new Date().toISOString(), error: null };
-  } catch (error) {
-    const latencyMs = Math.round(performance.now() - started);
-    return { ok: false, status: 'incident', latencyMs, checkedAt: new Date().toISOString(), error: error.message };
-  }
-}
-
-async function buildSnapshot(force = false) {
+async function buildSnapshotOnce(force = false) {
   const now = Date.now();
   if (!force && lastSnapshot && now - lastSnapshotAt < 20000) return lastSnapshot;
+  const operationalHistory = await readIncidentHistory();
 
   const [
-    containers,
+    containerResult,
     sonarrHealth,
     radarrHealth,
     sonarrQueue,
@@ -896,7 +909,7 @@ async function buildSnapshot(force = false) {
     nzbdavDockerLog,
     usage
   ] = await Promise.all([
-    dockerContainers(),
+    dockerContainers(operationalHistory.containerRestarts),
     arrHealth('sonarr'),
     arrHealth('radarr'),
     arrQueue('sonarr'),
@@ -905,7 +918,7 @@ async function buildSnapshot(force = false) {
     wantedCounts('radarr'),
     nzbdavQueue(),
     bazarrProviders(),
-    mountStatus(),
+    mountStatus(operationalHistory.mounts),
     readTail(config.paths.verifierLog),
     readTail(config.paths.periodicLog),
     readTail(config.paths.watchdogLog),
@@ -933,22 +946,12 @@ async function buildSnapshot(force = false) {
     { name: 'Bazarr', lines: recentLines(bazarrLog, 300) }
   ]);
   const allIncidents = buildIncidents(attention.recent);
-  const repairRuns = verifier.runs.filter((run) => run.ended);
-  verifier.summary = {
-    runs: repairRuns.length,
-    succeeded: repairRuns.filter((run) => Number(run.repairs || 0) > 0).length,
-    clean: repairRuns.filter((run) => Number(run.repairs || 0) === 0).length,
-    failed: repairRuns.filter((run) => !run.ended).length,
-    repairs: repairRuns.reduce((sum, run) => sum + Number(run.repairs || 0), 0),
-    period: `laatste ${repairRuns.length} verifier-runs`
-  };
+  verifier.summary = verifierSummary(verifier.runs);
 
-  const serviceIncidents = [];
-  if (mounts.overall === 'incident') serviceIncidents.push({ fingerprint: 'mount-read-check', id: 'mount-read-check', title: 'WebDAV-mount niet leesbaar', severity: 'critical', area: 'Mount', advice: 'Controleer rclone/InfiniDysk en voer daarna de watchdog uit.', source: 'Live read-test', subject: 'Een of meer read-only paden ontbreken of time-outen.', firstSeen: new Date().toISOString(), lastSeen: new Date().toISOString(), count: 1, active: true, resolvedAt: null });
-  for (const health of [sonarrHealth, radarrHealth]) if (!health.reachable) serviceIncidents.push({ fingerprint: `api-${health.app}`, id: 'api-unreachable', title: `${health.app[0].toUpperCase() + health.app.slice(1)} API niet bereikbaar`, severity: 'critical', area: 'Arr API', advice: 'Controleer container, netwerk en API-configuratie.', source: 'Live API-check', subject: `HTTP ${health.status || 0}`, firstSeen: health.checkedAt, lastSeen: health.checkedAt, count: 1, active: true, resolvedAt: null });
   const snapshot = {
     generatedAt: new Date().toISOString(),
-    containers,
+    containers: containerResult.containers,
+    docker: { reachable: containerResult.reachable },
     health: { sonarr: sonarrHealth, radarr: radarrHealth },
     queues: { sonarr: sonarrQueue, radarr: radarrQueue, nzbdav },
     wanted: { sonarr: sonarrWanted, radarr: radarrWanted },
@@ -958,12 +961,7 @@ async function buildSnapshot(force = false) {
     repairs: verifier,
     periodic,
     attention,
-    incidents: {
-      active: [...serviceIncidents, ...allIncidents.filter((incident) => incident.active)],
-      resolved: allIncidents.filter((incident) => !incident.active && incident.id === 'repair-action'),
-      historical: allIncidents.filter((incident) => !incident.active),
-      rules: 'Providertrip/mount: 1 uur; import: 2 uur; missing/corrupt: 6 uur; searchlimiet: 12 uur; succesvolle automation direct opgelost.'
-    },
+    incidents: { active: allIncidents.filter((incident) => incident.active), resolved: [], historical: [], rules: 'Actief is nu relevant; opgelost blijft 72 uur zichtbaar; historisch bevat oudere opgeloste occurrences binnen de retentie.' },
     usage,
     problems: {
       nzbdav: nzbdavProblems,
@@ -979,13 +977,25 @@ async function buildSnapshot(force = false) {
       bazarr: recentLines(bazarrLog, 160)
     }
   };
-  snapshot.providers = providerPerformance(attention);
+  snapshot.providers = providerPerformance(attention, allIncidents);
   snapshot.chain = buildChain(snapshot);
+  snapshot.attentionItems = buildAttentionItems(snapshot);
+  const currentByKey = new Map(snapshot.attentionItems.map((item) => [item.key, item]));
+  const lifecycle = reconcileIncidentHistory(operationalHistory.incidents, snapshot.attentionItems.map((item) => ({ fingerprint: item.key, id: item.type, title: item.title, severity: item.severity, area: item.tab, source: item.source, firstSeen: item.firstSeen, lastSeen: item.lastSeen, count: 1 })), new Date(), config.monitoring.resolvedHours, config.monitoring.retentionDays);
+  const enrich = (item) => ({ ...item, advice: currentByKey.get(item.fingerprint)?.advice || 'Het probleem is niet meer actief.', detail: currentByKey.get(item.fingerprint)?.detail || 'incidents' });
+  snapshot.incidents = { ...snapshot.incidents, active: lifecycle.active.map(enrich), resolved: lifecycle.resolved.map(enrich), historical: lifecycle.historical.map(enrich) };
   snapshot.overview = classifyOverview(snapshot);
   snapshot.history = await recordMetrics(snapshot);
+  await writeIncidentHistory({ version: 1, incidents: lifecycle.entries, mounts: mounts.state, containerRestarts: containerResult.restartCounts });
   lastSnapshot = snapshot;
   lastSnapshotAt = now;
   return lastSnapshot;
+}
+
+async function buildSnapshot(force = false) {
+  if (snapshotBuildPromise) return snapshotBuildPromise;
+  snapshotBuildPromise = buildSnapshotOnce(force).finally(() => { snapshotBuildPromise = null; });
+  return snapshotBuildPromise;
 }
 
 async function serveStatic(req, res) {

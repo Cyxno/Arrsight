@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import { calculateTabBadges, selectCriticalBanner, tabFromHash } from '../public/dashboard-ui.js';
+import { calculateTabBadges, selectCriticalBanner, selectPrimaryAttention, tabFromHash } from '../public/dashboard-ui.js';
 
 const baseSnapshot = () => ({
   incidents: { active: [] },
@@ -59,7 +59,17 @@ test('critical banner selects the newest critical incident and destination', () 
     { id: 'provider-trip', title: 'Provider trip', severity: 'critical', source: 'Sunny', advice: 'Controleer provider', lastSeen: '2026-09-02T09:00:00Z' },
     { id: 'mount-read-check', title: 'Mount offline', severity: 'critical', source: 'Read-test', advice: 'Controleer mount', lastSeen: '2026-09-02T10:00:00Z' }
   );
-  assert.deepEqual(selectCriticalBanner(snapshot), { title: 'Mount offline', source: 'Read-test', action: 'Controleer mount', tab: 'system', detail: 'mount' });
+  const selected = selectCriticalBanner(snapshot);
+  assert.equal(selected.title, 'Mount offline'); assert.equal(selected.source, 'Read-test'); assert.equal(selected.advice, 'Controleer mount'); assert.equal(selected.tab, 'system'); assert.equal(selected.detail, 'mount');
+});
+
+test('server attention list is the single source for badges banner and recommendation', () => {
+  const point = { key:'queue:sonarr:42', type:'queue-failed', severity:'critical', tab:'downloads', title:'Sonarr queue failed', source:'Sonarr queue', advice:'Controleer item', detail:'queues', firstSeen:'2026-09-02T09:00:00Z', lastSeen:'2026-09-02T10:00:00Z' };
+  const snapshot = { attentionItems:[point], incidents:{active:[]}, queues:{}, containers:[] };
+  assert.deepEqual(calculateTabBadges(snapshot).overview, {count:1,severity:'critical'});
+  assert.deepEqual(calculateTabBadges(snapshot).downloads, {count:1,severity:'critical'});
+  assert.equal(selectCriticalBanner(snapshot).key, point.key);
+  assert.equal(selectPrimaryAttention(snapshot).key, point.key);
 });
 
 test('HTML keeps light, dark and system theme choices and accessible panels', async () => {
@@ -67,7 +77,7 @@ test('HTML keeps light, dark and system theme choices and accessible panels', as
   assert.match(html, /value="auto">Systeem/);
   assert.match(html, /value="light">Licht/);
   assert.match(html, /value="dark">Donker/);
-  assert.equal((html.match(/role="tabpanel"/g) || []).length, 4);
+  assert.equal((html.match(/data-panel="/g) || []).length, 4);
 });
 
 test('client listens for hash changes without loading another snapshot', async () => {

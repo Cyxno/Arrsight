@@ -5,65 +5,40 @@ export const TABS = Object.freeze([
   { id: 'system', hash: '#system', label: 'Systeem', panelId: 'panel-system' }
 ]);
 
-const PROVIDER_IDS = new Set(['provider-trip', 'single-provider', 'missing-articles']);
-const DOWNLOAD_IDS = new Set(['import-stuck', 'search-limit', 'queue-busy']);
-const SYSTEM_IDS = new Set(['mount-read-check', 'mount-watchdog', 'api-unreachable']);
-
-export function tabFromHash(hash = '') {
-  const normalized = String(hash || '').toLowerCase();
-  return TABS.find((tab) => tab.hash === normalized) || TABS[0];
-}
+export function tabFromHash(hash = '') { const normalized = String(hash || '').toLowerCase(); return TABS.find((tab) => tab.hash === normalized) || TABS[0]; }
 
 export function incidentTab(incident = {}) {
-  if (PROVIDER_IDS.has(incident.id) || /provider|usenet/i.test(`${incident.area || ''} ${incident.source || ''}`)) return 'providers';
-  if (SYSTEM_IDS.has(incident.id) || /mount|docker|api/i.test(`${incident.area || ''} ${incident.source || ''}`)) return 'system';
-  if (DOWNLOAD_IDS.has(incident.id) || /queue|import|search|repair/i.test(`${incident.area || ''} ${incident.source || ''}`)) return 'downloads';
+  if (/provider|usenet|missing-articles/i.test(`${incident.id || ''} ${incident.area || ''} ${incident.source || ''}`)) return 'providers';
+  if (/mount|docker|api|container/i.test(`${incident.id || ''} ${incident.area || ''} ${incident.source || ''}`)) return 'system';
+  if (/queue|import|search|repair/i.test(`${incident.id || ''} ${incident.area || ''} ${incident.source || ''}`)) return 'downloads';
   return 'overview';
 }
 
-function unique(items) {
-  return new Map(items.map((item) => [item.key, item])).values();
+function fallbackItems(snapshot = {}) {
+  const items = (snapshot.incidents?.active || []).map((incident) => ({ key: `incident:${incident.fingerprint || `${incident.id}:${incident.source}:${incident.title}`}`, type: incident.id || 'incident', severity: incident.severity === 'critical' ? 'critical' : 'warning', tab: incidentTab(incident), title: incident.title || 'Operationeel probleem', source: incident.source || 'Dashboard', advice: incident.advice || 'Controleer de betreffende service.', detail: incident.detail || (incidentTab(incident) === 'providers' ? 'providers' : incidentTab(incident) === 'downloads' ? 'queues' : incident.id === 'mount-read-check' ? 'mount' : 'incidents'), firstSeen: incident.firstSeen, lastSeen: incident.lastSeen }));
+  for (const name of ['sonarr', 'radarr', 'nzbdav']) {
+    const queue = snapshot.queues?.[name] || {}; const rows = queue.rows || queue.records || [];
+    for (const row of rows) if (['incident', 'degraded'].includes(row.state)) items.push({ key: `queue:${name}:${row.id || row.title}`, type: row.state === 'incident' ? 'queue-failed' : 'queue-stalled', severity: row.state === 'incident' ? 'critical' : 'warning', tab: 'downloads', title: `${name} queue ${row.state === 'incident' ? 'failed' : 'vastgelopen'}`, source: `${name} queue`, advice: 'Open de queue-details en controleer het item.', detail: 'queues', firstSeen: row.addedAt, lastSeen: snapshot.generatedAt });
+    if (!rows.some((row) => ['incident', 'degraded'].includes(row.state))) {
+      for (let index = 0; index < Number(queue.failed || 0); index += 1) items.push({ key:`queue:${name}:failed:${index}`, type:'queue-failed', severity:'critical', tab:'downloads', title:`${name} queue failed`, source:`${name} queue`, advice:'Open de queue-details.', detail:'queues', lastSeen:snapshot.generatedAt });
+      for (let index = 0; index < Number(queue.stalled || 0); index += 1) items.push({ key:`queue:${name}:stalled:${index}`, type:'queue-stalled', severity:'warning', tab:'downloads', title:`${name} queue vastgelopen`, source:`${name} queue`, advice:'Controleer voortgang en importstatus.', detail:'queues', lastSeen:snapshot.generatedAt });
+    }
+  }
+  for (const container of snapshot.containers || []) if (!container.ok || ['unhealthy', 'starting'].includes(container.health)) items.push({ key: `container:${container.name}`, type: 'container-state', severity: !container.ok || container.health === 'unhealthy' ? 'critical' : 'warning', tab: 'system', title: `${container.name} heeft aandacht nodig`, source: 'Docker', advice: 'Controleer containerstatus en logs.', detail: 'containers', lastSeen: snapshot.generatedAt });
+  return [...new Map(items.map((item) => [item.key, item])).values()];
 }
 
-function severity(item) {
-  return item.severity === 'critical' || item.status === 'incident' ? 'critical' : 'warning';
-}
-
-export function attentionItems(snapshot = {}) {
-  const incidents = (snapshot.incidents?.active || []).map((incident) => ({
-    key: incident.fingerprint || `${incident.id || 'incident'}:${incident.source || ''}:${incident.subject || incident.title || ''}`,
-    severity: incident.severity || 'warning',
-    tab: incidentTab(incident),
-    incident
-  }));
-  const queues = ['sonarr', 'radarr', 'nzbdav'].flatMap((name) => {
-    const queue = snapshot.queues?.[name] || {};
-    return [
-      ...Array.from({ length: Number(queue.failed || 0) }, (_, index) => ({ key: `queue:${name}:failed:${index}`, severity: 'critical', tab: 'downloads' })),
-      ...Array.from({ length: Number(queue.stalled || 0) }, (_, index) => ({ key: `queue:${name}:stalled:${index}`, severity: 'warning', tab: 'downloads' }))
-    ];
-  });
-  const containers = (snapshot.containers || []).filter((container) => !container.ok || (container.health && container.health !== 'healthy')).map((container) => ({ key: `container:${container.name}`, severity: !container.ok ? 'critical' : 'warning', tab: 'system' }));
-  return [...unique([...incidents, ...queues, ...containers])];
-}
+export function attentionItems(snapshot = {}) { return Array.isArray(snapshot.attentionItems) ? snapshot.attentionItems : fallbackItems(snapshot); }
 
 export function calculateTabBadges(snapshot = {}) {
-  const all = attentionItems(snapshot);
-  const result = {};
-  for (const tab of TABS) {
-    const items = tab.id === 'overview' ? all : all.filter((item) => item.tab === tab.id);
-    result[tab.id] = { count: items.length, severity: items.some((item) => severity(item) === 'critical') ? 'critical' : items.length ? 'warning' : null };
-  }
+  const all = attentionItems(snapshot); const result = {};
+  for (const tab of TABS) { const items = tab.id === 'overview' ? all : all.filter((item) => item.tab === tab.id); result[tab.id] = { count: items.length, severity: items.some((item) => item.severity === 'critical') ? 'critical' : items.length ? 'warning' : null }; }
   return result;
 }
 
-export function selectCriticalBanner(snapshot = {}) {
-  const candidates = (snapshot.incidents?.active || []).filter((incident) => incident.severity === 'critical');
-  candidates.sort((a, b) => new Date(b.lastSeen || 0) - new Date(a.lastSeen || 0));
-  const incident = candidates[0];
-  if (!incident) return null;
-  const tab = incidentTab(incident);
-  return { title: incident.title || 'Kritiek probleem', source: incident.source || incident.area || 'Onbekende bron', action: incident.advice || 'Open de details en controleer de geraakte service.', tab, detail: tab === 'providers' ? 'providers' : tab === 'downloads' ? 'queues' : incident.id === 'mount-read-check' ? 'mount' : 'incidents' };
+const IMPACT = { 'mount-read-check':100, 'docker-unreachable':95, 'container-state':90, 'api-unreachable':85, 'queue-failed':80, 'provider-trip':70, 'provider-connection':70, 'queue-stalled':50 };
+export function selectPrimaryAttention(snapshot = {}, includeWarnings = true) {
+  return [...attentionItems(snapshot)].filter((item) => includeWarnings || item.severity === 'critical').sort((a, b) => Number(b.severity === 'critical') - Number(a.severity === 'critical') || (IMPACT[b.type] || 0) - (IMPACT[a.type] || 0) || new Date(a.firstSeen || 0) - new Date(b.firstSeen || 0) || new Date(b.lastSeen || 0) - new Date(a.lastSeen || 0))[0] || null;
 }
 
-
+export function selectCriticalBanner(snapshot = {}) { return selectPrimaryAttention(snapshot, false); }

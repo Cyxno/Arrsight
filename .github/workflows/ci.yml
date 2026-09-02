@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm test
+      - run: node --check server.js
+      - run: node --check lib/telemetry.js
+      - run: node --check lib/mount-check.js
+      - run: node --check lib/mount-check-worker.js
+      - run: node --check public/app.js
+      - run: node --check public/dashboard-ui.js

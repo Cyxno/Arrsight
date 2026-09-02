@@ -22,21 +22,20 @@ Het dashboard draait volledig lokaal, gebruikt geen externe assets of chart-libr
 
 ![Arr Health dashboard in light mode](docs/dashboard-light.png)
 
-Bovenaan staan maximaal zeven hoofdkaarten. Ze beantwoorden direct:
+Bovenaan staan vier compacte beslissingskaarten. Ze beantwoorden direct:
 
 - **Algemene status** — gezond, degraded, incident of onbekend.
-- **Actieve problemen** — alleen problemen die nu nog relevant zijn.
 - **Queues** — normale downloads zijn blauw; alleen stalled of failed items vragen aandacht.
-- **Automatisch herstel** — geslaagde repairs blijven zichtbaar als positief automationresultaat.
-- **Providers** — providertrips en missing-article-signalen uit echte logs.
-- **WebDAV-mount** — read-only beschikbaarheid en gemeten latency.
-- **Trend** — beter of slechter dan de vorige periode.
+- **Providers** — dynamisch herkende providertrips en missing-article-signalen uit echte logs.
+- **WebDAV-mount** — read-only beschikbaarheid, gemeten latency en werkelijk laatst succesvolle controle.
 
 ## Dark mode die ook echt rustig blijft
 
 ![Arr Health dashboard in dark mode](docs/dashboard-dark.png)
 
 Light, dark en system/auto gebruiken dezelfde semantische statuskleuren. De handmatige keuze wordt lokaal onthouden en de pagina volgt bij een eerste bezoek automatisch het systeemthema, zonder zichtbare theme-flash.
+
+![Arr Health providers-tab met fictieve data](docs/dashboard-providers.png)
 
 | Kleur | Betekenis | Voorbeeld |
 | --- | --- | --- |
@@ -71,9 +70,9 @@ De interface gebruikt vier hoofdtabbladen, zodat de dagelijkse controle compact 
 
 De URL-hash is de route en maakt elk tabblad bookmarkbaar: `#overview`, `#downloads`, `#providers` en `#system`. Zonder of met een onbekende hash opent Overzicht. Terug/vooruit en refresh behouden de actieve context; een gewone tabwissel gebruikt de bestaande snapshot en doet geen extra API-request.
 
-Tabbadges verschijnen alleen bij actuele aandachtspunten. Normale downloadactiviteit blijft informatief en badgevrij; failed/stalled queues, providerincidenten, onbereikbare services, unhealthy containers en mountproblemen tellen wel mee. De Overzicht-badge dedupliceert incidenten op hun stabiele fingerprint.
+Algemene status, tabbadges, banner en aanbeveling gebruiken dezelfde server-side lijst met unieke actuele aandachtspunten. Normale downloadactiviteit blijft informatief en badgevrij; failed/stalled queues, providerincidenten, onbereikbare services, unhealthy of gestopte containers en mountproblemen tellen wel mee. Stabiele keys voorkomen eenvoudige dubbeltelling.
 
-Een kritiek actief incident verschijnt onder de globale navigatie als klikbare banner met bron en aanbevolen actie. De banner opent direct het passende tabblad en waar mogelijk het relevante detailvenster.
+Het belangrijkste kritieke aandachtspunt verschijnt onder de globale navigatie als klikbare banner met bron en aanbevolen actie. Dit kan ook een failed queue, gestopte container of onbereikbare API zijn. De banner opent direct het passende tabblad en de relevante detailweergave. Zonder kritiek maar met een waarschuwing toont de aanbevelingskaart die waarschuwing; “Geen actie nodig” verschijnt alleen bij een lege aandachtspuntenlijst.
 
 Op mobiel is de tabbar horizontaal scrollbaar en blijft de actieve tab in beeld. Met het toetsenbord werken Tab, Enter, Spatie, pijl links/rechts, Home en End. De tabs en panelen gebruiken de bijbehorende ARIA-rollen en relaties; badgetellingen zijn in de toegankelijke tabnaam opgenomen.
 
@@ -89,9 +88,15 @@ Logsignalen krijgen een stabiele fingerprint, categorie, severity, first/last se
 
 Regels zonder betrouwbare timestamp worden veilig als historisch behandeld.
 
+De operationele lifecycle wordt privacyvriendelijk vastgelegd in `incidents-history.json`. Actieve occurrences worden op hun fingerprint heropend, `firstSeen` blijft behouden en herstel verhuist een occurrence eerst naar **Opgelost** (72 uur) en daarna naar **Historisch**. Het bestand bevat geen logregels, paden, mediatitels, releasenamen of credentials en heeft dezelfde begrensde retentie als de metriekhistorie.
+
 ### Queue-aging in plaats van “queue = fout”
 
-Een niet-lege queue is normale activiteit. Arr Health onderscheidt actief downloaden, tijdelijk geen voortgang, langdurig stalled en expliciete importfouten. Waar de brondata dit ondersteunt worden voortgang, resterende grootte, ETA en leeftijd getoond. Problematische en oudste items komen bovenaan.
+Een niet-lege queue is normale activiteit. Bron-specifieke adapters onderscheiden actief downloaden, wachten op import, stalled en expliciete fouten. Alleen geldige absolute starttimestamps leveren een leeftijd op; `timeleft` blijft uitsluitend ETA. Waar de brondata dit ondersteunt worden voortgang, resterende grootte, ETA en leeftijd getoond.
+
+Queueproblemen gebruiken de bron-ID als stabiele identiteit en anders een eenrichtingshash van bron en genormaliseerde titel. Die hash wordt niet in metriekhistorie als mediatitel opgeslagen. De huidige logbronnen delen geen betrouwbare queue-ID, waardoor een queuefout en een inhoudelijk vergelijkbaar logincident afzonderlijk kunnen blijven; binnen iedere bron worden dubbele keys wel verwijderd. Dit vermijdt een onjuiste correlatie op basis van alleen een mediatitel.
+
+Queueomvang is een neutrale activiteitstrend. Alleen de afzonderlijke probleemscore (failed/stalled queues, kritieke incidenten, onbereikbare services, mounts en containers) krijgt de interpretatie beter, stabiel of slechter.
 
 ### Read-only mountcontrole
 
@@ -99,7 +104,13 @@ De tv-, movie- en InfiniDysk-paden krijgen een echte directory-read met harde ti
 
 ### Privacyvriendelijke historie
 
-`metrics-history.json` bevat alleen operationele totalen en statussen: queues, wanted/cutoff, incidentcategorieën, repairs, mountlatency, API-responstijden en containerstatus. Writes zijn geserialiseerd en atomair. Standaard wordt iedere vijf minuten gemeten met 90 dagen begrensde retentie. Een ontbrekend of beschadigd bestand laat het dashboard niet crashen.
+`metrics-history.json` bevat alleen operationele totalen en statussen: queues, wanted/cutoff, incidentcategorieën, repairs, mountlatency, API-responstijden, probleemscore en containerstatus. `incidents-history.json` bewaart de geschoonde incidentlifecycle, mount-herstelstatus en de vorige container-restart counts. Writes zijn geserialiseerd en atomair. Standaard wordt iedere vijf minuten gemeten met 90 dagen begrensde retentie. Een ontbrekend of beschadigd bestand laat het dashboard niet crashen.
+
+Mountreads draaien in een afzonderlijk killbaar Node-proces met een harde timeout en schrijven nooit naar de mount. Daardoor blijft de dashboardserver vrij wanneer een FUSE/WebDAV-read blijft hangen. Per mount blijven huidige meting, laatste succes, laatste fout en opeenvolgende failures zichtbaar, ook na een dashboardrestart.
+
+Providerkaarten worden dynamisch afgeleid uit gelabelde gebeurtenissen binnen een expliciet venster van 24 uur. Bekende Viper- en Sunny-hostnamen worden leesbaar genormaliseerd; onbekende veilige hostnamen blijven zichtbaar. Missing articles alleen maken een provider niet down en verlopen trips houden de status niet onbeperkt degraded.
+
+De Plex-weergave is bewust `Plex-container`: ze bewijst dat de geconfigureerde Dockercontainer draait, niet dat de Plex API of een end-to-end stream gezond is. Voor Bazarr worden container- en API-signalen eveneens afzonderlijk geïnterpreteerd.
 
 ## Techniek
 
@@ -171,10 +182,14 @@ Handmatige acties staan bewust onder een ingeklapt beheerblok. De backend accept
 ```text
 server.js                 API-aggregatie, historie en veilige acties
 lib/telemetry.js          status-, queue-, incident- en trendlogica
+lib/mount-check.js        killbare read-only mountchecks en mountstate
+lib/mount-check-worker.js geïsoleerde filesystem-read
 public/index.html         semantische dashboardstructuur
 public/app.js             rendering en interactie
+public/dashboard-ui.js    clientfallback, tabs, badges en prioriteitsselectie
 public/styles.css         responsive light/dark designsysteem
-test/telemetry.test.js    gerichte status- en regressietests
+test/*.test.js            gerichte status-, lifecycle-, mount- en UI-regressietests
+.github/workflows/ci.yml  Node.js 20-tests en syntaxchecks
 config.example.json       veilige configuratietemplate
 unraid/                   Unraid Docker-template
 docs/                     README-screenshots

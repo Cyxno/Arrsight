@@ -2,6 +2,8 @@ config.json
 usage-history.json
 metrics-history.json
 metrics-history.json.*.tmp
+incidents-history.json
+incidents-history.json.*.tmp
 action-runner.log
 actions/
 *.log

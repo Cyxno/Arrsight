@@ -19,6 +19,7 @@
   "monitoring": {
     "sampleMinutes": 5,
     "retentionDays": 90,
+    "resolvedHours": 72,
     "queueStaleMinutes": 30,
     "queueFailedMinutes": 120,
     "mountWarnMs": 1500,
