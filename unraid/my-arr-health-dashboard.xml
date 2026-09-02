@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>arr-health-dashboard</Name>
+  <Repository>node:20-alpine</Repository>
+  <Registry>https://hub.docker.com/_/node</Registry>
+  <Network>host</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Overview>Remco&apos;s &apos;Arr monitoring tool for Sonarr, Radarr, NzbDAV, Bazarr and Plex health checks, logs and safe manual actions.</Overview>
+  <Category>MediaApp:Video Status:Stable</Category>
+  <WebUI>http://[IP]:[PORT:8090]/</WebUI>
+  <Icon>http://192.168.1.2:8090/icon.png</Icon>
+  <ExtraParams>--label net.unraid.docker.icon=http://192.168.1.2:8090/icon.png --label net.unraid.docker.webui=http://192.168.1.2:8090/ --label org.opencontainers.image.title=&quot;Remco Arr monitoring tool&quot;</ExtraParams>
+  <PostArgs>node /app/server.js</PostArgs>
+  <CPUset/>
+  <DateInstalled>1784890800</DateInstalled>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="Appdata" Target="/app" Default="/mnt/user/appdata/arr-health-dashboard" Mode="rw" Description="Dashboard application and queued host actions." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/arr-health-dashboard</Config>
+  <Config Name="All appdata logs" Target="/data" Default="/mnt/user/appdata" Mode="ro" Description="Read-only access to app logs." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata</Config>
+  <Config Name="Symlinks" Target="/symlinks" Default="/mnt/vm_storage/symlinks" Mode="ro" Description="Read-only access to media symlinks." Type="Path" Display="always" Required="true" Mask="false">/mnt/vm_storage/symlinks</Config>
+  <Config Name="NzbDAV mount" Target="/nzbdav" Default="/mnt/remote/nzbdav" Mode="ro" Description="Read-only NzbDAV mount status." Type="Path" Display="always" Required="true" Mask="false">/mnt/remote/nzbdav</Config>
+  <Config Name="Docker socket" Target="/var/run/docker.sock" Default="/var/run/docker.sock" Mode="ro" Description="Read-only Docker status and controlled restart actions." Type="Path" Display="advanced" Required="true" Mask="false">/var/run/docker.sock</Config>
+</Container>

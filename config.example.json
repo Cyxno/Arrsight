@@ -1,0 +1,19 @@
+{
+  "port": 8090,
+  "sonarr": {
+    "url": "http://127.0.0.1:7854",
+    "apiKey": "SONARR_API_KEY"
+  },
+  "radarr": {
+    "url": "http://127.0.0.1:7878",
+    "apiKey": "RADARR_API_KEY"
+  },
+  "nzbdav": {
+    "url": "http://127.0.0.1:3001",
+    "apiKey": "NZBDAV_API_KEY"
+  },
+  "bazarr": {
+    "url": "http://127.0.0.1:6767",
+    "apiKey": "BAZARR_API_KEY"
+  }
+}

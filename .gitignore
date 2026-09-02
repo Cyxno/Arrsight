@@ -1,0 +1,11 @@
+config.json
+usage-history.json
+action-runner.log
+actions/
+*.log
+*.bak
+*.sqlite*
+.env
+.DS_Store
+node_modules/
+

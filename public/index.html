@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="nl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Remco's 'Arr + InfiniDysk monitoring tool</title>
+    <link rel="icon" href="/icon.png" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand-block">
+        <img class="brand-mark" src="/infinidysk-logo.png" alt="" />
+        <div>
+        <p class="eyebrow">Unraid media command center · InfiniDysk</p>
+        <h1>Remco's 'Arr + InfiniDysk monitoring tool</h1>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button id="exportBtn" type="button">Export snapshot</button>
+        <span id="lastUpdated" class="muted">Laden...</span>
+        <button id="refreshBtn" type="button">Refresh</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="summary-grid" id="summaryGrid"></section>
+
+      <section class="panel usage-panel">
+        <div class="panel-head">
+          <div>
+            <h2>Dataverbruik</h2>
+            <p id="usageMeta">InfiniDysk netwerkverbruik wordt geladen.</p>
+          </div>
+        </div>
+        <div id="usageGrid" class="usage-grid"></div>
+      </section>
+
+      <section class="panel actions-panel">
+        <div class="panel-head">
+          <div>
+            <h2>Acties</h2>
+            <p>Searches, repairs, service-links en gecontroleerde herstarts.</p>
+          </div>
+          <span id="actionStatus" class="muted">Klaar</span>
+        </div>
+        <div id="serviceLinks" class="service-links"></div>
+        <div id="actionGrid" class="action-grid"></div>
+      </section>
+
+      <section class="panel attention-panel">
+        <div class="panel-head">
+          <div>
+            <h2>Waar op letten</h2>
+            <p>Signalen uit de logs die belangrijk zijn voor stabiliteit, imports, providers en repairs.</p>
+          </div>
+          <select id="attentionFilter" aria-label="Attention filter">
+            <option value="all">Alles</option>
+            <option value="critical">Kritiek</option>
+            <option value="warning">Waarschuwingen</option>
+            <option value="info">Info</option>
+          </select>
+        </div>
+        <div id="attentionSummary" class="attention-summary"></div>
+        <div id="attentionRows" class="attention-grid"></div>
+      </section>
+
+      <section class="layout">
+        <div class="panel wide">
+          <div class="panel-head">
+            <div>
+              <h2>Problemen</h2>
+              <p>Missing articles, 404's, timeouts en provider limits uit de laatste logs.</p>
+            </div>
+            <select id="problemFilter" aria-label="Probleemfilter">
+              <option value="all">Alle problemen</option>
+              <option value="missingArticles">Missing articles</option>
+              <option value="notFound">404 / not found</option>
+              <option value="timeout">Timeouts</option>
+              <option value="providerLimit">Provider limits</option>
+              <option value="pathMissing">Path missing</option>
+            </select>
+          </div>
+          <div class="metric-row" id="problemCounts"></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Titel / bestand</th>
+                  <th>Logregel</th>
+                </tr>
+              </thead>
+              <tbody id="problemRows"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Wanted</h2>
+              <p>Wat nog ontbreekt of cutoff niet haalt.</p>
+            </div>
+          </div>
+          <div id="wantedGrid" class="stack"></div>
+        </div>
+      </section>
+
+      <section class="layout">
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Queues</h2>
+              <p>Huidige activiteit in Sonarr, Radarr en InfiniDysk.</p>
+            </div>
+          </div>
+          <div id="queueGrid" class="stack"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Bazarr Providers</h2>
+              <p>Subtitle providers en rate limits.</p>
+            </div>
+          </div>
+          <div id="providerGrid" class="stack"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Repairs & Searches</h2>
+            <p>Integrity verifier per uur en periodieke missing/upgrade searches.</p>
+          </div>
+        </div>
+        <div class="repair-layout">
+          <div>
+            <h3>Overzicht</h3>
+            <div id="repairBars" class="bars"></div>
+          </div>
+          <div>
+            <h3>Laatste repairs</h3>
+            <div class="table-wrap compact">
+              <table>
+                <thead>
+                  <tr>
+                    <th>App</th>
+                    <th>Reden</th>
+                    <th>Pad</th>
+                  </tr>
+                </thead>
+                <tbody id="repairRows"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Logs</h2>
+            <p>Snelle inkijk zonder in de terminal te duiken.</p>
+          </div>
+          <select id="logSelect" aria-label="Logbestand">
+            <option value="verifier">Integrity verifier</option>
+            <option value="periodic">Periodic search</option>
+            <option value="watchdog">InfiniDysk watchdog</option>
+            <option value="actions">Dashboard acties</option>
+            <option value="nzbdav">InfiniDysk docker</option>
+            <option value="bazarr">Bazarr</option>
+          </select>
+        </div>
+        <pre id="logBox" class="logbox">Laden...</pre>
+      </section>
+    </main>
+
+    <dialog id="detailModal" class="modal">
+      <div class="modal-head">
+        <div>
+          <h2 id="modalTitle">Details</h2>
+          <p id="modalSubtitle"></p>
+        </div>
+        <button id="modalClose" type="button">Sluiten</button>
+      </div>
+      <div id="modalBody" class="modal-body"></div>
+    </dialog>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
