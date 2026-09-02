@@ -15,5 +15,13 @@
   "bazarr": {
     "url": "http://127.0.0.1:6767",
     "apiKey": "BAZARR_API_KEY"
+  },
+  "monitoring": {
+    "sampleMinutes": 5,
+    "retentionDays": 90,
+    "queueStaleMinutes": 30,
+    "queueFailedMinutes": 120,
+    "mountWarnMs": 1500,
+    "mountTimeoutMs": 5000
   }
 }

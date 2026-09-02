@@ -2,11 +2,13 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildIncidents, classifyOverview, classifyQueue, metricPoint, pruneHistory, trend } from './lib/telemetry.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
 const configPath = path.join(__dirname, 'config.json');
 const usageHistoryPath = path.join(__dirname, 'usage-history.json');
+const metricsHistoryPath = path.join(__dirname, 'metrics-history.json');
 const usageMaxAttributionMs = 15 * 60 * 1000;
 
 const defaultConfig = {
@@ -36,13 +38,17 @@ const defaultConfig = {
     nzbdavMount: '/nzbdav'
   },
   dockerSocket: '/var/run/docker.sock',
-  containers: ['InfiniDysk', 'binhex-sonarr', 'binhex-radarr', 'bazarr', 'binhex-plexpass']
+  containers: ['InfiniDysk', 'binhex-sonarr', 'binhex-radarr', 'bazarr', 'binhex-plexpass'],
+  monitoring: { sampleMinutes: 5, retentionDays: 90, queueStaleMinutes: 30, queueFailedMinutes: 120, mountWarnMs: 1500, mountTimeoutMs: 5000 }
 };
 
 let config = defaultConfig;
 let lastSnapshot = null;
 let lastSnapshotAt = 0;
 let usageWriteQueue = Promise.resolve();
+let metricsWriteQueue = Promise.resolve();
+let measurementRunning = false;
+let actionRunning = false;
 
 async function loadConfig() {
   try {
@@ -155,6 +161,43 @@ async function writeUsageHistory(history) {
     await fs.writeFile(usageHistoryPath, JSON.stringify(history, null, 2) + '\n', { mode: 0o600 });
   }).catch(() => {});
   return usageWriteQueue;
+}
+
+async function readMetricsHistory() {
+  try {
+    const parsed = JSON.parse(await fs.readFile(metricsHistoryPath, 'utf8'));
+    return { version: 1, points: pruneHistory(parsed.points, new Date(), config.monitoring.retentionDays) };
+  } catch {
+    return { version: 1, points: [] };
+  }
+}
+
+async function writeMetricsHistory(history) {
+  metricsWriteQueue = metricsWriteQueue.then(async () => {
+    const temporary = `${metricsHistoryPath}.${process.pid}.tmp`;
+    await fs.writeFile(temporary, `${JSON.stringify(history)}\n`, { mode: 0o600 });
+    await fs.rename(temporary, metricsHistoryPath);
+  }).catch((error) => console.error('Metrics history write failed:', error.message));
+  return metricsWriteQueue;
+}
+
+async function recordMetrics(snapshot) {
+  const history = await readMetricsHistory();
+  const lastAt = new Date(history.points.at(-1)?.at || 0).getTime();
+  const interval = Math.max(1, Number(config.monitoring.sampleMinutes || 5)) * 60000;
+  if (Date.now() - lastAt >= interval) {
+    history.points.push(metricPoint(snapshot));
+    history.points = pruneHistory(history.points, new Date(), config.monitoring.retentionDays);
+    await writeMetricsHistory(history);
+  }
+  const queueTotal = (point) => Object.values(point.queue || {}).reduce((sum, queue) => sum + Number(queue.total || 0), 0);
+  return {
+    retentionDays: config.monitoring.retentionDays,
+    sampleMinutes: config.monitoring.sampleMinutes,
+    points24h: history.points.filter((p) => Date.now() - new Date(p.at).getTime() <= 86400000),
+    points7d: history.points.filter((p) => Date.now() - new Date(p.at).getTime() <= 7 * 86400000),
+    queueTrend: trend(history.points, queueTotal)
+  };
 }
 
 function networkTotals(stats) {
@@ -639,21 +682,41 @@ function basenameTitle(value) {
 
 async function arrHealth(app) {
   const base = config[app];
+  const started = performance.now();
   const result = await fetchJson(`${base.url}/api/v3/health?apikey=${encodeURIComponent(base.apiKey)}`);
-  return { app, ok: result.ok && Array.isArray(result.data) && result.data.length === 0, status: result.status, data: result.data || result.error };
+  return { app, reachable: result.ok, ok: result.ok && Array.isArray(result.data) && result.data.length === 0, status: result.status, latencyMs: Math.round(performance.now() - started), checkedAt: new Date().toISOString(), data: result.data || result.error };
+}
+
+function providerPerformance(attention) {
+  const lines = attention.recent || [];
+  const names = ['Sunny', 'Viper'];
+  return names.map((name) => {
+    const related = lines.filter((event) => new RegExp(name, 'i').test(`${event.line} ${event.subject}`));
+    const trips = related.filter((event) => event.id === 'provider-trip');
+    const missing = related.filter((event) => event.id === 'missing-articles');
+    const lastTrip = trips.at(-1)?.observedAt || null;
+    return { name, status: trips.length ? 'degraded' : related.length ? 'healthy' : 'unknown', trips: trips.length, missingArticles: missing.length, lastTrip, source: 'afgeleid uit recente logregels', period: 'huidige logsnapshot' };
+  }).filter((provider) => provider.status !== 'unknown' || lines.some((event) => new RegExp(provider.name, 'i').test(event.line)));
+}
+
+function buildChain(snapshot) {
+  const node = (id, label, status, latencyMs, lastSuccess, problem = null) => ({ id, label, status, latencyMs, lastSuccess, problem });
+  return [
+    node('arr', 'Sonarr / Radarr', snapshot.health.sonarr.reachable && snapshot.health.radarr.reachable ? (snapshot.health.sonarr.ok && snapshot.health.radarr.ok ? 'healthy' : 'degraded') : 'incident', Math.max(snapshot.health.sonarr.latencyMs || 0, snapshot.health.radarr.latencyMs || 0), snapshot.health.sonarr.reachable && snapshot.health.radarr.reachable ? snapshot.generatedAt : null),
+    node('provider', 'Usenet-provider', snapshot.providers.some((p) => p.status === 'degraded') ? 'degraded' : snapshot.providers.length ? 'healthy' : 'unknown', null, null, snapshot.providers.find((p) => p.status === 'degraded')?.name || null),
+    node('infinidysk', 'InfiniDysk', snapshot.queues.nzbdav.ok ? (snapshot.queues.nzbdav.failed ? 'incident' : 'healthy') : 'incident', null, snapshot.queues.nzbdav.ok ? snapshot.generatedAt : null),
+    node('mount', 'WebDAV-mount', snapshot.mounts.overall, snapshot.mounts.maxLatencyMs, snapshot.mounts.lastKnownGood),
+    node('library', 'Import / library', !snapshot.queues.sonarr.ok || !snapshot.queues.radarr.ok ? 'unknown' : snapshot.queues.sonarr.failed + snapshot.queues.radarr.failed ? 'incident' : snapshot.queues.sonarr.stalled + snapshot.queues.radarr.stalled ? 'degraded' : 'healthy', null, snapshot.queues.sonarr.ok && snapshot.queues.radarr.ok ? snapshot.generatedAt : null),
+    node('bazarr', 'Bazarr', snapshot.bazarr.ok ? 'healthy' : 'unknown', null, snapshot.bazarr.ok ? snapshot.generatedAt : null)
+  ];
 }
 
 async function arrQueue(app) {
   const base = config[app];
   const result = await fetchJson(`${base.url}/api/v3/queue?apikey=${encodeURIComponent(base.apiKey)}&page=1&pageSize=1000`);
   const records = result.ok ? (result.data.records || []) : [];
-  return { app, ok: result.ok, total: records.length, byStatus: groupBy(records, (r) => r.status || 'unknown'), records: records.slice(0, 30).map((r) => ({
-    title: r.title || r.sourceTitle || '',
-    status: r.status || '',
-    sizeleft: r.sizeleft || 0,
-    trackedDownloadStatus: r.trackedDownloadStatus || '',
-    messages: r.statusMessages || []
-  })) };
+  const classified = classifyQueue(records, new Date(), config.monitoring.queueStaleMinutes, config.monitoring.queueFailedMinutes);
+  return { app, ok: result.ok, byStatus: groupBy(records, (r) => r.status || 'unknown'), ...classified, records: classified.rows.slice(0, 50) };
 }
 
 async function wantedCounts(app) {
@@ -674,7 +737,8 @@ async function wantedCounts(app) {
 async function nzbdavQueue() {
   const result = await fetchJson(`${config.nzbdav.url}/api?mode=queue&output=json&apikey=${encodeURIComponent(config.nzbdav.apiKey)}`);
   const rows = result.ok ? (result.data.queue?.slots || []) : [];
-  return { ok: result.ok, total: rows.length, byStatus: groupBy(rows, (r) => r.status || 'unknown'), rows: rows.slice(0, 40) };
+  const classified = classifyQueue(rows, new Date(), config.monitoring.queueStaleMinutes, config.monitoring.queueFailedMinutes);
+  return { ok: result.ok, byStatus: groupBy(rows, (r) => r.status || 'unknown'), ...classified, rows: classified.rows.slice(0, 50) };
 }
 
 async function bazarrProviders() {
@@ -693,7 +757,8 @@ async function dockerContainers() {
       ok: info.ok && info.data?.State?.Running,
       status: info.data?.State?.Status || info.error || 'unknown',
       health: info.data?.State?.Health?.Status || null,
-      startedAt: info.data?.State?.StartedAt || null
+      startedAt: info.data?.State?.StartedAt || null,
+      restartCount: Number(info.data?.RestartCount || 0)
     });
   }
   return containers;
@@ -727,7 +792,11 @@ async function queueHostAction(action) {
 }
 
 async function runAction(body) {
+  if (actionRunning) return { ok: false, status: 409, error: 'Er loopt al een beheeractie' };
   const action = body?.action;
+  if (typeof action !== 'string' || action.length > 80) return { ok: false, status: 400, error: 'Ongeldige actie' };
+  actionRunning = true;
+  try {
   if (action === 'restart-container') {
     const target = String(body?.target || '');
     if (!config.containers.includes(target)) return { ok: false, status: 400, error: 'Container not allowed' };
@@ -760,6 +829,9 @@ async function runAction(body) {
   }
 
   return { ok: false, status: 400, error: 'Unknown action' };
+  } finally {
+    actionRunning = false;
+  }
 }
 
 function groupBy(rows, fn) {
@@ -772,24 +844,31 @@ function groupBy(rows, fn) {
 }
 
 async function mountStatus() {
-  const checks = await Promise.all([
-    exists(path.join(config.paths.nzbdavMount, 'completed-symlinks')),
-    exists(config.paths.tvRoot),
-    exists(config.paths.movieRoot)
-  ]);
+  const targets = { nzbdav: path.join(config.paths.nzbdavMount, 'completed-symlinks'), tvRoot: config.paths.tvRoot, movieRoot: config.paths.movieRoot };
+  const entries = await Promise.all(Object.entries(targets).map(async ([name, target]) => [name, await readTest(target)]));
+  const checks = Object.fromEntries(entries);
+  const states = Object.values(checks).map((check) => check.status);
+  const overall = states.includes('incident') ? 'incident' : states.includes('degraded') ? 'degraded' : states.every((s) => s === 'healthy') ? 'healthy' : 'unknown';
   return {
-    nzbdav: checks[0],
-    tvRoot: checks[1],
-    movieRoot: checks[2]
+    ...Object.fromEntries(Object.entries(checks).map(([key, value]) => [key, value.ok])),
+    checks, overall, maxLatencyMs: Math.max(0, ...Object.values(checks).map((check) => check.latencyMs || 0)),
+    lastKnownGood: Object.values(checks).every((check) => check.ok) ? new Date().toISOString() : null
   };
 }
 
-async function exists(target) {
+async function readTest(target) {
+  const started = performance.now();
   try {
-    await fs.access(target);
-    return true;
-  } catch {
-    return false;
+    const timeoutMs = Number(config.monitoring.mountTimeoutMs || 5000);
+    await Promise.race([
+      fs.readdir(target, { withFileTypes: true }).then((items) => items.slice(0, 1).map((item) => item.name)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('read timeout')), timeoutMs))
+    ]);
+    const latencyMs = Math.round(performance.now() - started);
+    return { ok: true, status: latencyMs >= Number(config.monitoring.mountWarnMs || 1500) ? 'degraded' : 'healthy', latencyMs, checkedAt: new Date().toISOString(), error: null };
+  } catch (error) {
+    const latencyMs = Math.round(performance.now() - started);
+    return { ok: false, status: 'incident', latencyMs, checkedAt: new Date().toISOString(), error: error.message };
   }
 }
 
@@ -853,8 +932,21 @@ async function buildSnapshot(force = false) {
     { name: 'rclone', lines: recentLines(rcloneLog, 260) },
     { name: 'Bazarr', lines: recentLines(bazarrLog, 300) }
   ]);
+  const allIncidents = buildIncidents(attention.recent);
+  const repairRuns = verifier.runs.filter((run) => run.ended);
+  verifier.summary = {
+    runs: repairRuns.length,
+    succeeded: repairRuns.filter((run) => Number(run.repairs || 0) > 0).length,
+    clean: repairRuns.filter((run) => Number(run.repairs || 0) === 0).length,
+    failed: repairRuns.filter((run) => !run.ended).length,
+    repairs: repairRuns.reduce((sum, run) => sum + Number(run.repairs || 0), 0),
+    period: `laatste ${repairRuns.length} verifier-runs`
+  };
 
-  lastSnapshot = {
+  const serviceIncidents = [];
+  if (mounts.overall === 'incident') serviceIncidents.push({ fingerprint: 'mount-read-check', id: 'mount-read-check', title: 'WebDAV-mount niet leesbaar', severity: 'critical', area: 'Mount', advice: 'Controleer rclone/InfiniDysk en voer daarna de watchdog uit.', source: 'Live read-test', subject: 'Een of meer read-only paden ontbreken of time-outen.', firstSeen: new Date().toISOString(), lastSeen: new Date().toISOString(), count: 1, active: true, resolvedAt: null });
+  for (const health of [sonarrHealth, radarrHealth]) if (!health.reachable) serviceIncidents.push({ fingerprint: `api-${health.app}`, id: 'api-unreachable', title: `${health.app[0].toUpperCase() + health.app.slice(1)} API niet bereikbaar`, severity: 'critical', area: 'Arr API', advice: 'Controleer container, netwerk en API-configuratie.', source: 'Live API-check', subject: `HTTP ${health.status || 0}`, firstSeen: health.checkedAt, lastSeen: health.checkedAt, count: 1, active: true, resolvedAt: null });
+  const snapshot = {
     generatedAt: new Date().toISOString(),
     containers,
     health: { sonarr: sonarrHealth, radarr: radarrHealth },
@@ -866,6 +958,12 @@ async function buildSnapshot(force = false) {
     repairs: verifier,
     periodic,
     attention,
+    incidents: {
+      active: [...serviceIncidents, ...allIncidents.filter((incident) => incident.active)],
+      resolved: allIncidents.filter((incident) => !incident.active && incident.id === 'repair-action'),
+      historical: allIncidents.filter((incident) => !incident.active),
+      rules: 'Providertrip/mount: 1 uur; import: 2 uur; missing/corrupt: 6 uur; searchlimiet: 12 uur; succesvolle automation direct opgelost.'
+    },
     usage,
     problems: {
       nzbdav: nzbdavProblems,
@@ -881,6 +979,11 @@ async function buildSnapshot(force = false) {
       bazarr: recentLines(bazarrLog, 160)
     }
   };
+  snapshot.providers = providerPerformance(attention);
+  snapshot.chain = buildChain(snapshot);
+  snapshot.overview = classifyOverview(snapshot);
+  snapshot.history = await recordMetrics(snapshot);
+  lastSnapshot = snapshot;
   lastSnapshotAt = now;
   return lastSnapshot;
 }
@@ -908,6 +1011,12 @@ async function serveStatic(req, res) {
 async function handler(req, res) {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname === '/api/action' && req.method === 'POST') {
+    const origin = req.headers.origin;
+    if (origin) {
+      try {
+        if (new URL(origin).host !== req.headers.host) return sendJson(res, 403, { ok: false, error: 'Cross-origin acties zijn niet toegestaan' });
+      } catch { return sendJson(res, 403, { ok: false, error: 'Ongeldige Origin-header' }); }
+    }
     const body = await readJsonBody(req);
     const result = await runAction(body);
     return sendJson(res, result.status || (result.ok ? 200 : 400), result);
@@ -935,3 +1044,10 @@ const server = http.createServer((req, res) => {
 server.listen(config.port, '0.0.0.0', () => {
   console.log(`Remco's 'Arr + InfiniDysk monitoring tool listening on http://0.0.0.0:${config.port}`);
 });
+
+setInterval(async () => {
+  if (measurementRunning) return;
+  measurementRunning = true;
+  try { await buildSnapshot(true); } catch (error) { console.error('Background measurement failed:', error.message); }
+  finally { measurementRunning = false; }
+}, Math.max(1, Number(config.monitoring.sampleMinutes || 5)) * 60000).unref();
