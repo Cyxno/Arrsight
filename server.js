@@ -697,7 +697,7 @@ function buildChain(snapshot) {
     node('arr', 'Sonarr / Radarr', snapshot.health.sonarr.reachable && snapshot.health.radarr.reachable ? (snapshot.health.sonarr.ok && snapshot.health.radarr.ok ? 'healthy' : 'degraded') : 'incident', Math.max(snapshot.health.sonarr.latencyMs || 0, snapshot.health.radarr.latencyMs || 0), snapshot.health.sonarr.reachable && snapshot.health.radarr.reachable ? snapshot.generatedAt : null),
     node('provider', 'Usenet-provider', snapshot.providers.some((p) => p.status === 'degraded') ? 'degraded' : snapshot.providers.length ? 'healthy' : 'unknown', null, null, snapshot.providers.find((p) => p.status === 'degraded')?.name || null),
     node('infinidysk', 'InfiniDysk', snapshot.queues.nzbdav.ok ? (snapshot.queues.nzbdav.failed ? 'incident' : 'healthy') : 'incident', null, snapshot.queues.nzbdav.ok ? snapshot.generatedAt : null),
-    node('mount', 'WebDAV-mount', snapshot.mounts.overall, snapshot.mounts.maxLatencyMs, snapshot.mounts.lastKnownGood),
+    node('mount', 'WebDAV-mount', snapshot.mounts.overall, snapshot.mounts.maxLatencyMs, snapshot.mounts.lastKnownGood, snapshot.mounts.enabled === false ? 'Not configured' : null),
     node('library', 'Import / library', !snapshot.queues.sonarr.ok || !snapshot.queues.radarr.ok ? 'unknown' : snapshot.queues.sonarr.failed + snapshot.queues.radarr.failed ? 'incident' : snapshot.queues.sonarr.stalled + snapshot.queues.radarr.stalled ? 'degraded' : 'healthy', null, snapshot.queues.sonarr.ok && snapshot.queues.radarr.ok ? snapshot.generatedAt : null),
     node('bazarr', 'Bazarr', snapshot.bazarr.ok ? 'healthy' : bazarrContainer && !bazarrContainer.ok ? 'incident' : 'unknown', null, snapshot.bazarr.ok ? snapshot.generatedAt : null, snapshot.bazarr.ok ? null : 'API not confirmed'),
     node('plex', 'Plex container', !plex ? 'unknown' : plex.ok && plex.health !== 'unhealthy' ? 'healthy' : 'incident', null, plex?.ok ? snapshot.generatedAt : null, !plex ? 'Not configured' : plex.ok ? null : 'Container not active')
@@ -886,7 +886,7 @@ async function buildSnapshotOnce(force = false) {
     nzbdavDockerLog,
     usage
   ] = await Promise.all([
-    config.monitoring.dockerEnabled ? dockerContainers(operationalHistory.containerRestarts) : Promise.resolve({reachable:undefined,containers:[],restartCounts:{}}),
+    config.monitoring.dockerEnabled ? dockerContainers(operationalHistory.containerRestarts) : Promise.resolve({enabled:false,reachable:undefined,containers:[],restartCounts:{}}),
     config.sonarr.enabled ? arrHealth('sonarr') : Promise.resolve({enabled:false,reachable:undefined,ok:true}),
     config.radarr.enabled ? arrHealth('radarr') : Promise.resolve({enabled:false,reachable:undefined,ok:true}),
     config.sonarr.enabled ? arrQueue('sonarr') : Promise.resolve({ok:true,rows:[],total:0,active:0,stalled:0,failed:0}),
@@ -895,7 +895,7 @@ async function buildSnapshotOnce(force = false) {
     config.radarr.enabled ? wantedCounts('radarr') : Promise.resolve({missing:null,cutoff:null}),
     (config.nzbdav.enabled||config.infinidysk.enabled) ? nzbdavQueue() : Promise.resolve({ok:true,rows:[],total:0,active:0,stalled:0,failed:0}),
     config.bazarr.enabled ? bazarrProviders() : Promise.resolve({ok:true,enabled:false}),
-    config.monitoring.mountsEnabled ? mountStatus(operationalHistory.mounts) : Promise.resolve({checks:{},overall:'unknown',state:{},maxLatencyMs:0}),
+    config.monitoring.mountsEnabled ? mountStatus(operationalHistory.mounts) : Promise.resolve({enabled:false,checks:{},overall:'disabled',state:{},maxLatencyMs:null}),
     readTail(config.paths.verifierLog),
     readTail(config.paths.periodicLog),
     readTail(config.paths.watchdogLog),

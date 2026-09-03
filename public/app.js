@@ -83,7 +83,7 @@ function summary(snapshot) {
     ['Overall status', label(safe(snapshot, 'overview.status', 'unknown')), `${number(safe(snapshot, 'overview.activeProblems', 0))} active signals`, safe(snapshot, 'overview.status', 'unknown'), 'overview', 'incidents'],
     ['Queue items', number(queues), stuck ? `${stuck} stalled/failed` : queues ? 'Normal activity' : 'Queue is empty', stuck ? 'degraded' : queues ? 'active' : 'healthy', 'downloads', 'queues'],
     ['Provider status', label(provider), snapshot.providers?.length ? `Derived · ${snapshot.providers[0].period || 'explicit measurement window'}` : 'Insufficient data', provider, 'providers', 'providers'],
-    ['WebDAV-mount', label(safe(snapshot, 'mounts.overall', 'unknown')), `${number(safe(snapshot, 'mounts.maxLatencyMs'))} ms read-latency`, safe(snapshot, 'mounts.overall', 'unknown'), 'system', 'mount']
+    ['WebDAV-mount', label(safe(snapshot, 'mounts.overall', 'unknown')), safe(snapshot, 'mounts.enabled') === false ? t('notConfigured') : `${number(safe(snapshot, 'mounts.maxLatencyMs'))} ms read-latency`, safe(snapshot, 'mounts.overall', 'unknown'), 'system', 'mount']
   ];
   $('summaryGrid').innerHTML = cards.map(([name, value, note, status, tab, detail]) => `<button class="status-card ${status}" type="button" data-goto-tab="${tab}" data-goto-detail="${detail}"><span class="badge ${status}">${label(status)}</span><span class="value">${esc(value)}</span><strong>${esc(name)}</strong><small>${esc(note)}</small><time>Last measurement ${when(snapshot.generatedAt)}</time></button>`).join('');
 }

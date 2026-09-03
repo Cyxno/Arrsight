@@ -89,6 +89,10 @@ test('repeated connection limit is an active provider incident', () => {
   const now = new Date('2026-09-02T10:00:00Z'); const events = [{ id:'provider-connection', subject:'Viper', line:'2026-09-02T09:50:00Z Last error from "Viper": connection limit' }];
   assert.equal(deriveProviders(events, buildIncidents(events, now), now)[0].status, 'incident');
 });
+test('disabled optional monitoring does not make overall health unknown', () => {
+  const snapshot = { health: { sonarr: { reachable: true }, radarr: { reachable: true } }, mounts: { enabled: false, overall: 'disabled' }, docker: { enabled: false }, attentionItems: [] };
+  assert.equal(classifyOverview(snapshot).status, 'healthy');
+});
 
 test('release names filenames versions and IP-like text are not providers',()=>{const now=new Date('2026-09-03T12:00:00Z');for(const subject of ['Show.Name.S01E02.1080p-GROUP','movie.final.mkv','v1.2.3','203.0.113.42']){const events=[{id:'provider-trip',subject,line:`2026-09-03T11:00:00Z ${subject}`}];assert.deepEqual(deriveProviders(events,buildIncidents(events,now),now),[]);}});
 
