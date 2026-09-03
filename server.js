@@ -700,7 +700,7 @@ function buildChain(snapshot) {
     node('mount', 'WebDAV-mount', snapshot.mounts.overall, snapshot.mounts.maxLatencyMs, snapshot.mounts.lastKnownGood, snapshot.mounts.enabled === false ? 'Not configured' : null),
     node('library', 'Import / library', !snapshot.queues.sonarr.ok || !snapshot.queues.radarr.ok ? 'unknown' : snapshot.queues.sonarr.failed + snapshot.queues.radarr.failed ? 'incident' : snapshot.queues.sonarr.stalled + snapshot.queues.radarr.stalled ? 'degraded' : 'healthy', null, snapshot.queues.sonarr.ok && snapshot.queues.radarr.ok ? snapshot.generatedAt : null),
     node('bazarr', 'Bazarr', snapshot.bazarr.ok ? 'healthy' : bazarrContainer && !bazarrContainer.ok ? 'incident' : 'unknown', null, snapshot.bazarr.ok ? snapshot.generatedAt : null, snapshot.bazarr.ok ? null : 'API not confirmed'),
-    node('plex', 'Plex container', !plex ? 'unknown' : plex.ok && plex.health !== 'unhealthy' ? 'healthy' : 'incident', null, plex?.ok ? snapshot.generatedAt : null, !plex ? 'Not configured' : plex.ok ? null : 'Container not active')
+    node('plex', 'Plex container', !plex ? 'disabled' : plex.ok && plex.health !== 'unhealthy' ? 'healthy' : 'incident', null, plex?.ok ? snapshot.generatedAt : null, !plex ? 'Not configured' : plex.ok ? null : 'Container not active')
   ];
 }
 
