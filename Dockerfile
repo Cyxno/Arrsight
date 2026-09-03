@@ -7,10 +7,11 @@ WORKDIR /app
 COPY --chown=node:node package.json server.js ./
 COPY --chown=node:node lib ./lib
 COPY --chown=node:node public ./public
-RUN mkdir -p /config && chown node:node /config
-USER node
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN apk add --no-cache su-exec && chmod 755 /usr/local/bin/docker-entrypoint.sh && mkdir -p /config
 EXPOSE 8090
 VOLUME ["/config"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD wget -qO- http://127.0.0.1:8090/api/health >/dev/null || exit 1
 STOPSIGNAL SIGTERM
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node","server.js"]

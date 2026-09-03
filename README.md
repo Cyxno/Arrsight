@@ -4,6 +4,8 @@ ArrSight is a private, dependency-light dashboard for a self-hosted media stack.
 
 ![ArrSight dashboard](docs/dashboard-light.png)
 
+Dark mode and the guided first-run setup are documented in [dashboard-dark.png](docs/dashboard-dark.png) and [setup-wizard.png](docs/setup-wizard.png).
+
 ## Integrations
 
 Sonarr, Radarr, Bazarr, Plex, Jellyfin, InfiniDysk, NZBDav, Docker container monitoring, WebDAV/filesystem mounts, verifier logs, watchdog logs, and periodic-search logs are independently optional.
@@ -16,6 +18,7 @@ docker run -d \
   --restart unless-stopped \
   -p 8090:8090 \
   -e CONFIG_DIR=/config \
+  -e PUID=1000 -e PGID=1000 -e UMASK=0022 \
   -v /path/to/arrsight:/config \
   -v /path/to/logs:/data:ro \
   -v /path/to/tv:/media/tv:ro \
@@ -26,13 +29,15 @@ docker run -d \
 
 Only when Docker monitoring or management is enabled, add `-v /var/run/docker.sock:/var/run/docker.sock:ro`. The socket grants powerful control over Docker even with a read-only bind option. Monitoring-only mode is the safe default and permits no container or host actions.
 
-Open `http://HOST:8090`. On first launch ArrSight redirects to `/setup` and prints a one-time, 30-minute setup code to the container log (`docker logs arrsight`). Secrets use password fields, are stored with mode `0600`, and are never returned by configuration APIs.
+Open `http://HOST:8090`. On first launch ArrSight redirects to `/setup` and prints a one-time, 30-minute setup code to the container log (`docker logs arrsight`). Setup also creates an administrator password using Node.js `scrypt`; only its salted hash is stored. Dashboard viewing remains open, while settings require an expiring HttpOnly, SameSite session. Secrets use password fields, are stored with mode `0600`, and are never returned by configuration APIs.
+
+`PUID`, `PGID`, and `UMASK` control the non-root runtime identity and created-file permissions. The entrypoint prepares only `/config`; it never recursively changes media/log mounts or changes Docker-socket permissions. When present, the socket group is added as a supplementary group. Unraid defaults are `PUID=99`, `PGID=100`, and `UMASK=0022`.
 
 ## Configuration and migration
 
 Runtime files live under `CONFIG_DIR` (`/config` in Docker): `config.json`, metrics, incidents, usage history, and `actions/`. Precedence is built-in safe defaults, the existing configuration file, then supported environment overrides (`CONFIG_DIR`). Version-1 configurations are migrated to schema version 2 in memory. On Docker upgrades, legacy runtime files in `/app` are copied once when their `/config` destination does not exist; the migration is idempotent and never overwrites data.
 
-Use the System → Settings section to revisit setup, replace secrets, change URLs and paths, test integrations, or select one of these modes:
+Use the System → Settings section to sign in, revisit setup, replace secrets, change URLs and paths, run service-specific authenticated connection tests, or select one of these modes:
 
 - Monitoring only: no management operations; Docker socket optional for status monitoring.
 - Monitoring and container management: socket required; operations remain limited to configured containers.

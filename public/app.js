@@ -1,13 +1,13 @@
 import { TABS, calculateTabBadges, incidentTab, selectCriticalBanner, selectPrimaryAttention, tabFromHash } from './dashboard-ui.js';
-import { getLocale, setLocale, t, translateDom } from './locales.js';
+import { getLocale, localeCode, setLocale, t, translateDom } from './locales.js';
 
 const state = { snapshot: null, incidentTab: 'active', logType: 'verifier', busy: false, pendingDetail: null };
 const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
-const number = (value) => value === null || value === undefined || !Number.isFinite(Number(value)) ? '–' : new Intl.NumberFormat('nl-NL').format(value);
-const when = (value) => { if (!value) return 'Unknown'; const date = new Date(value); return Number.isNaN(+date) ? 'Unknown' : date.toLocaleString('nl-NL', { dateStyle: 'short', timeStyle: 'short' }); };
-const bytes = (value) => { let size = Number(value || 0); let unit = 0; const units = ['B', 'KB', 'MB', 'GB', 'TB']; while (size >= 1024 && unit < 4) { size /= 1024; unit += 1; } return `${size.toLocaleString('nl-NL', { maximumFractionDigits: unit ? 1 : 0 })} ${units[unit]}`; };
-const label = (value) => ({ healthy: 'Healthy', degraded: 'Degraded', incident: 'Incident', unknown: 'Unknown', active: 'Active' })[value] || value || 'Unknown';
+const number = (value) => value === null || value === undefined || !Number.isFinite(Number(value)) ? '–' : new Intl.NumberFormat(localeCode()).format(value);
+const when = (value) => { if (!value) return t('unknown'); const date = new Date(value); return Number.isNaN(+date) ? t('unknown') : date.toLocaleString(localeCode(), { dateStyle: 'short', timeStyle: 'short' }); };
+const bytes = (value) => { let size = Number(value || 0); let unit = 0; const units = ['B', 'KB', 'MB', 'GB', 'TB']; while (size >= 1024 && unit < 4) { size /= 1024; unit += 1; } return `${size.toLocaleString(localeCode(), { maximumFractionDigits: unit ? 1 : 0 })} ${units[unit]}`; };
+const label = (value) => t(value||'unknown');
 
 function safe(object, path, fallback = null) {
   return path.split('.').reduce((value, key) => value?.[key], object) ?? fallback;
@@ -25,8 +25,8 @@ function renderTabs() {
   $('mainTabs').innerHTML = TABS.map((tab) => {
     const selected = tab.id === active.id;
     const badge = badges[tab.id];
-    const suffix = badge.count ? `, ${badge.count} actieve ${badge.severity === 'critical' ? 'problemen' : 'waarschuwingen'}` : '';
-    return `<button id="tab-${tab.id}" class="main-tab${selected ? ' active' : ''}" type="button" role="tab" aria-selected="${selected}" aria-controls="${tab.panelId}" aria-label="${tab.label}${suffix}" tabindex="${selected ? 0 : -1}" data-main-tab="${tab.id}"><span>${tab.label}</span>${badge.count ? `<span class="tab-badge ${badge.severity}" aria-hidden="true">${badge.count}</span>` : ''}</button>`;
+    const suffix = badge.count ? `, ${badge.count}` : '';
+    return `<button id="tab-${tab.id}" class="main-tab${selected ? ' active' : ''}" type="button" role="tab" aria-selected="${selected}" aria-controls="${tab.panelId}" aria-label="${t(tab.id)}${suffix}" tabindex="${selected ? 0 : -1}" data-main-tab="${tab.id}"><span>${t(tab.id)}</span>${badge.count ? `<span class="tab-badge ${badge.severity}" aria-hidden="true">${badge.count}</span>` : ''}</button>`;
   }).join('');
   for (const tab of TABS) $(tab.panelId).hidden = tab.id !== active.id;
   requestAnimationFrame(() => { const button = document.getElementById(`tab-${active.id}`); button?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'auto' }); if (focusedTab === active.id) button?.focus(); });
@@ -51,7 +51,7 @@ async function load(force = false) {
     state.snapshot = await response.json();
     render();
   } catch (error) {
-    $('lastUpdated').textContent = `Niet beschikbaar · ${error.message}`;
+    $('lastUpdated').textContent = `${t('unavailable')} · ${error.message}`;
     $('headerStatus').className = 'badge incident';
     $('headerStatus').textContent = 'Offline';
     renderTabs();
@@ -60,12 +60,13 @@ async function load(force = false) {
 
 function render() {
   const snapshot = state.snapshot;
-  $('lastUpdated').textContent = `Bijgewerkt ${when(snapshot.generatedAt)}`;
+  $('lastUpdated').textContent = `${t('updated')} ${when(snapshot.generatedAt)}`;
   $('headerStatus').className = `badge ${safe(snapshot, 'overview.status', 'unknown')}`;
   $('headerStatus').textContent = label(safe(snapshot, 'overview.status', 'unknown'));
   renderTabs(); renderBanner(snapshot); summary(snapshot); recommendation(snapshot); incidents(snapshot); chain(snapshot); trends(snapshot);
   queues(snapshot); wanted(snapshot); repairs(snapshot); providers(snapshot); providerIncidents(snapshot); providerTrends(snapshot);
   containers(snapshot); systemChecks(snapshot); usage(snapshot); logs(snapshot); actions(snapshot);
+  translateDom();
 }
 
 function renderBanner(snapshot) {
@@ -79,25 +80,25 @@ function summary(snapshot) {
   const stuck = Number(safe(snapshot, 'overview.failedQueues', 0)) + Number(safe(snapshot, 'overview.stalledQueues', 0));
   const provider = (snapshot.providers || []).some((item) => item.status === 'degraded') ? 'degraded' : snapshot.providers?.length ? 'healthy' : 'unknown';
   const cards = [
-    ['Algemene status', label(safe(snapshot, 'overview.status', 'unknown')), `${number(safe(snapshot, 'overview.activeProblems', 0))} actieve signalen`, safe(snapshot, 'overview.status', 'unknown'), 'overview', 'incidents'],
-    ['Queue-items', number(queues), stuck ? `${stuck} stalled/failed` : queues ? 'Normale activiteit' : 'Queue is leeg', stuck ? 'degraded' : queues ? 'active' : 'healthy', 'downloads', 'queues'],
-    ['Providerstatus', label(provider), snapshot.providers?.length ? `Afgeleid · ${snapshot.providers[0].period || 'expliciet meetvenster'}` : 'Onvoldoende gegevens', provider, 'providers', 'providers'],
+    ['Overall status', label(safe(snapshot, 'overview.status', 'unknown')), `${number(safe(snapshot, 'overview.activeProblems', 0))} active signals`, safe(snapshot, 'overview.status', 'unknown'), 'overview', 'incidents'],
+    ['Queue items', number(queues), stuck ? `${stuck} stalled/failed` : queues ? 'Normal activity' : 'Queue is empty', stuck ? 'degraded' : queues ? 'active' : 'healthy', 'downloads', 'queues'],
+    ['Provider status', label(provider), snapshot.providers?.length ? `Derived · ${snapshot.providers[0].period || 'explicit measurement window'}` : 'Insufficient data', provider, 'providers', 'providers'],
     ['WebDAV-mount', label(safe(snapshot, 'mounts.overall', 'unknown')), `${number(safe(snapshot, 'mounts.maxLatencyMs'))} ms read-latency`, safe(snapshot, 'mounts.overall', 'unknown'), 'system', 'mount']
   ];
-  $('summaryGrid').innerHTML = cards.map(([name, value, note, status, tab, detail]) => `<button class="status-card ${status}" type="button" data-goto-tab="${tab}" data-goto-detail="${detail}"><span class="badge ${status}">${label(status)}</span><span class="value">${esc(value)}</span><strong>${esc(name)}</strong><small>${esc(note)}</small><time>Laatste meting ${when(snapshot.generatedAt)}</time></button>`).join('');
+  $('summaryGrid').innerHTML = cards.map(([name, value, note, status, tab, detail]) => `<button class="status-card ${status}" type="button" data-goto-tab="${tab}" data-goto-detail="${detail}"><span class="badge ${status}">${label(status)}</span><span class="value">${esc(value)}</span><strong>${esc(name)}</strong><small>${esc(note)}</small><time>Last measurement ${when(snapshot.generatedAt)}</time></button>`).join('');
 }
 
 function recommendation(snapshot) {
   const primary = selectPrimaryAttention(snapshot);
   $('recommendationTitle').textContent = primary?.title || 'No action needed';
-  $('recommendationText').textContent = primary?.advice || 'Alle gecontroleerde onderdelen zijn rustig. Blijf de automatische metingen volgen.';
+  $('recommendationText').textContent = primary?.advice || 'All checked components are clear. Continue monitoring automatic measurements.';
 }
 
 function incidents(snapshot) {
   document.querySelectorAll('[data-incident-tab]').forEach((button) => { const selected = button.dataset.incidentTab === state.incidentTab; button.classList.toggle('active', selected); button.setAttribute('aria-selected', selected); button.tabIndex = selected ? 0 : -1; });
   $('incidentList').setAttribute('aria-labelledby', `incident-tab-${state.incidentTab}`);
   const list = snapshot.incidents?.[state.incidentTab] || [];
-  $('incidentList').innerHTML = list.length ? list.slice(0, 20).map((item) => row(item.title, `${item.advice || 'No advice'} · ${item.source || 'Unknown source'} · ${number(item.count)}× · laatst ${when(item.lastSeen)}`, item.active ? 'Active' : 'Resolved', item.active ? item.severity === 'critical' ? 'incident' : 'degraded' : 'healthy')).join('') : row(state.incidentTab === 'active' ? 'No active incidents' : 'No items', state.incidentTab === 'active' ? 'De keten heeft nu geen actieve log-afgeleide storing.' : snapshot.incidents?.rules || 'No history.', 'Clear', 'healthy');
+  $('incidentList').innerHTML = list.length ? list.slice(0, 20).map((item) => row(item.title, `${item.advice || 'No advice'} · ${item.source || 'Unknown source'} · ${number(item.count)}× · last ${when(item.lastSeen)}`, item.active ? 'Active' : 'Resolved', item.active ? item.severity === 'critical' ? 'incident' : 'degraded' : 'healthy')).join('') : row(state.incidentTab === 'active' ? 'No active incidents' : 'No items', state.incidentTab === 'active' ? 'The pipeline has no active log-derived outage.' : snapshot.incidents?.rules || 'No history.', 'Clear', 'healthy');
 }
 
 function chain(snapshot) {
@@ -106,86 +107,86 @@ function chain(snapshot) {
 
 function spark(points, getter) {
   const values = (points || []).map(getter).map(Number).filter(Number.isFinite);
-  if (values.length < 2) return '<p class="muted empty-chart">History wordt opgebouwd</p>';
+  if (values.length < 2) return '<p class="muted empty-chart">History is being collected</p>';
   const low = Math.min(...values); const high = Math.max(...values); const range = high - low || 1;
   const polyline = values.map((value, index) => `${(index / (values.length - 1)) * 100},${58 - ((value - low) / range) * 52}`).join(' ');
   return `<svg class="spark" viewBox="0 0 100 60" preserveAspectRatio="none" aria-hidden="true"><polyline points="${polyline}"/></svg>`;
 }
 
 function trendCards(points, all, definitions) {
-  return definitions.map(([name, getter]) => `<div class="trend-card"><div class="trend-head"><strong>${name}</strong><span class="muted">${number(getter(points.at(-1) || {}))}</span></div>${spark(points, getter)}<p class="muted">24 uur · ${all.length} samples in 7 dagen</p></div>`).join('');
+  return definitions.map(([name, getter]) => `<div class="trend-card"><div class="trend-head"><strong>${name}</strong><span class="muted">${number(getter(points.at(-1) || {}))}</span></div>${spark(points, getter)}<p class="muted">24 hours · ${all.length} samples in 7 days</p></div>`).join('');
 }
 
 function trends(snapshot) {
   const points = snapshot.history?.points24h || []; const all = snapshot.history?.points7d || [];
-  $('trends').innerHTML = trendCards(points, all, [['Queueactiviteit (neutraal)', (point) => Object.values(point.queue || {}).reduce((sum, queue) => sum + Number(queue.total || 0), 0)], ['Probleemscore', (point) => point.problemScore], ['Mount latency', (point) => point.mount?.latencyMs]]);
-  $('downloadTrends').innerHTML = trendCards(points, all, [['Queue totaal', (point) => Object.values(point.queue || {}).reduce((sum, queue) => sum + Number(queue.total || 0), 0)], ['Vastgelopen', (point) => Object.values(point.queue || {}).reduce((sum, queue) => sum + Number(queue.stalled || 0), 0)], ['Failed', (point) => Object.values(point.queue || {}).reduce((sum, queue) => sum + Number(queue.failed || 0), 0)]]);
-  $('historyMeta').textContent = `Elke ${number(snapshot.history?.sampleMinutes)} min · ${number(snapshot.history?.retentionDays)} dagen retentie`;
+  $('trends').innerHTML = trendCards(points, all, [[t('queueActivity'), (point) => Object.values(point.queue || {}).reduce((sum, queue) => sum + Number(queue.total || 0), 0)], [t('problemScore'), (point) => point.problemScore], [t('mountLatency'), (point) => point.mount?.latencyMs]]);
+  $('downloadTrends').innerHTML = trendCards(points, all, [['Queue total', (point) => Object.values(point.queue || {}).reduce((sum, queue) => sum + Number(queue.total || 0), 0)], ['Stalled', (point) => Object.values(point.queue || {}).reduce((sum, queue) => sum + Number(queue.stalled || 0), 0)], ['Failed', (point) => Object.values(point.queue || {}).reduce((sum, queue) => sum + Number(queue.failed || 0), 0)]]);
+  $('historyMeta').textContent = t('historyMeta',{minutes:number(snapshot.history?.sampleMinutes),days:number(snapshot.history?.retentionDays)});
 }
 
 function queues(snapshot) {
-  $('queues').innerHTML = ['sonarr', 'radarr', 'nzbdav'].map((key) => { const queue = snapshot.queues?.[key] || {}; const status = !queue.ok ? 'unknown' : queue.failed ? 'incident' : queue.stalled ? 'degraded' : queue.total ? 'active' : 'healthy'; return row(key === 'nzbdav' ? 'InfiniDysk' : key[0].toUpperCase() + key.slice(1), queue.ok ? `${number(queue.active)} actief · ${number(queue.stalled)} stil · oudste ${number(queue.oldestMinutes || 0)} min` : 'Source unreachable', `${number(queue.total || 0)} items`, status, 'queues'); }).join('');
+  $('queues').innerHTML = ['sonarr', 'radarr', 'nzbdav'].map((key) => { const queue = snapshot.queues?.[key] || {}; const status = !queue.ok ? 'unknown' : queue.failed ? 'incident' : queue.stalled ? 'degraded' : queue.total ? 'active' : 'healthy'; return row(key === 'nzbdav' ? 'InfiniDysk' : key[0].toUpperCase() + key.slice(1), queue.ok ? `${number(queue.active)} active · ${number(queue.stalled)} stalled · oldest ${number(queue.oldestMinutes || 0)} min` : 'Source unreachable', `${number(queue.total || 0)} items`, status, 'queues'); }).join('');
 }
 
 function wanted(snapshot) {
   const items = [['Sonarr missing', safe(snapshot, 'wanted.sonarr.missing')], ['Sonarr cutoff unmet', safe(snapshot, 'wanted.sonarr.cutoff')], ['Radarr missing', safe(snapshot, 'wanted.radarr.missing')], ['Radarr cutoff unmet', safe(snapshot, 'wanted.radarr.cutoff')]];
-  $('wanted').innerHTML = items.map(([name, value]) => row(name, value === null ? 'Source unreachable' : value === 0 ? 'No backlog' : 'Monitored backlog; leeftijd niet beschikbaar', number(value), value === null ? 'unknown' : value === 0 ? 'healthy' : 'active')).join('');
+  $('wanted').innerHTML = items.map(([name, value]) => row(name, value === null ? 'Source unreachable' : value === 0 ? 'No backlog' : 'Monitored backlog; age unavailable', number(value), value === null ? 'unknown' : value === 0 ? 'healthy' : 'active')).join('');
 }
 
 function repairs(snapshot) {
   const repair = snapshot.repairs?.summary || {}; const counts = snapshot.periodic?.counts || {};
   const searches = ['sonarr_missing', 'sonarr_upgrade', 'radarr_missing', 'radarr_upgrade'].reduce((sum, key) => sum + Number(counts[key] || 0), 0);
   const verifierState = repair.failed ? 'incident' : repair.incomplete ? 'degraded' : repair.running ? 'active' : repair.runs ? 'healthy' : 'unknown';
-  $('repairs').innerHTML = row('Verifier', `${number(repair.clean || 0)} schoon · ${number(repair.succeeded || 0)} met repairs · ${number(repair.running || 0)} actief · ${number(repair.incomplete || 0)} incompleet · ${number(repair.failed || 0)} mislukt`, `${number(repair.repairs || 0)} repairs`, verifierState, 'repairs') + row('Periodic searches', `${number(counts.radarr_missing_backoff || 0)} backoffs · huidige logsnapshot`, number(searches), searches ? 'active' : 'healthy');
+  $('repairs').innerHTML = row('Verifier', `${number(repair.clean || 0)} clean · ${number(repair.succeeded || 0)} with repairs · ${number(repair.running || 0)} active · ${number(repair.incomplete || 0)} incomplete · ${number(repair.failed || 0)} failed`, `${number(repair.repairs || 0)} repairs`, verifierState, 'repairs') + row('Periodic searches', `${number(counts.radarr_missing_backoff || 0)} backoffs · current log snapshot`, number(searches), searches ? 'active' : 'healthy');
 }
 
 function providers(snapshot) {
-  $('providers').innerHTML = snapshot.providers?.length ? snapshot.providers.map((provider) => row(provider.name, `${number(provider.trips)} trips · ${number(provider.missingArticles)} missing articles · ${provider.period || 'unknown period'} · last trip ${when(provider.lastTrip)} · herstel ${when(provider.lastRecovery)}`, label(provider.status), provider.status, 'providers')).join('') : row('No provider data', 'Providers appear only when reliable log data is available.', 'Unknown', 'unknown');
+  $('providers').innerHTML = snapshot.providers?.length ? snapshot.providers.map((provider) => row(provider.name, `${number(provider.trips)} trips · ${number(provider.missingArticles)} missing articles · ${provider.period || 'unknown period'} · last trip ${when(provider.lastTrip)} · recovery ${when(provider.lastRecovery)}`, label(provider.status), provider.status, 'providers')).join('') : row('No provider data', 'Providers appear only when reliable log data is available.', 'Unknown', 'unknown');
 }
 
 function providerIncidents(snapshot) {
   const list = (snapshot.incidents?.active || []).filter((item) => incidentTab(item) === 'providers');
-  $('providerIncidents').innerHTML = list.length ? list.map((item) => row(item.title, `${item.source || 'Unknown source'} · ${item.advice || 'No advice'} · laatst ${when(item.lastSeen)}`, label(item.severity === 'critical' ? 'incident' : 'degraded'), item.severity === 'critical' ? 'incident' : 'degraded')).join('') : row('No active provider incidents', 'Geen recente trips, timeouts of missing-articlewaarschuwingen.', 'Clear', 'healthy');
+  $('providerIncidents').innerHTML = list.length ? list.map((item) => row(item.title, `${item.source || 'Unknown source'} · ${item.advice || 'No advice'} · last ${when(item.lastSeen)}`, label(item.severity === 'critical' ? 'incident' : 'degraded'), item.severity === 'critical' ? 'incident' : 'degraded')).join('') : row('No active provider incidents', 'No recent trips, timeouts, or missing-article warnings.', 'Clear', 'healthy');
 }
 
 function providerTrends(snapshot) {
   const points = snapshot.history?.points24h || []; const all = snapshot.history?.points7d || [];
   const getter = (point) => ['provider-trip', 'single-provider', 'missing-articles'].reduce((sum, key) => sum + Number(point.incidents?.[key] || 0), 0);
-  $('providerTrends').innerHTML = points.some((point) => getter(point) > 0) ? trendCards(points, all, [['Provider incidents', getter]]) : '<p class="muted">Nog onvoldoende betrouwbare providerhistorie voor een trend.</p>';
+  $('providerTrends').innerHTML = points.some((point) => getter(point) > 0) ? trendCards(points, all, [[t('providerIncidents'), getter]]) : `<p class="muted">${t('providerHistoryInsufficient')}</p>`;
 }
 
 function containers(snapshot) {
-  $('containers').innerHTML = (snapshot.containers || []).map((container) => { const status = !container.ok ? 'incident' : container.health && container.health !== 'healthy' ? 'degraded' : 'healthy'; return row(container.name, `Docker ${container.status || 'unknown'} · health ${container.health || 'niet ingesteld'} · gestart ${when(container.startedAt)}`, `${number(container.restartCount)} restarts`, status); }).join('') || row('No container data', 'Docker is unreachable of er zijn geen containers geconfigureerd.', 'Unknown', 'unknown');
+  $('containers').innerHTML = (snapshot.containers || []).map((container) => { const status = !container.ok ? 'incident' : container.health && container.health !== 'healthy' ? 'degraded' : 'healthy'; return row(container.name, `Docker ${container.status || 'unknown'} · health ${container.health || 'not configured'} · started ${when(container.startedAt)}`, `${number(container.restartCount)} restarts`, status); }).join('') || row(t('noContainers'), t('noContainersHelp'), t('unknown'), 'unknown');
 }
 
 function systemChecks(snapshot) {
-  const healthRows = ['sonarr', 'radarr'].map((key) => { const health = snapshot.health?.[key] || {}; return row(`${key[0].toUpperCase() + key.slice(1)} API`, health.reachable ? `HTTP ${number(health.status)} · gecontroleerd ${when(health.checkedAt)}` : 'API unreachable', `${number(health.latencyMs)} ms`, health.reachable ? health.ok ? 'healthy' : 'degraded' : 'incident'); });
-  const mountRows = Object.entries(snapshot.mounts?.checks || {}).map(([name, check]) => row(name, `${check.error || 'Read-test geslaagd'} · gecontroleerd ${when(check.checkedAt)} · laatst goed ${when(check.lastKnownGood)} · last fout ${when(check.lastFailure)} · ${number(check.consecutiveFailures || 0)} opeenvolgende fouten`, `${number(check.latencyMs)} ms`, check.status || 'unknown', 'mount'));
+  const healthRows = ['sonarr', 'radarr'].map((key) => { const health = snapshot.health?.[key] || {}; return row(`${key[0].toUpperCase() + key.slice(1)} API`, health.reachable ? `HTTP ${number(health.status)} · checked ${when(health.checkedAt)}` : 'API unreachable', `${number(health.latencyMs)} ms`, health.reachable ? health.ok ? 'healthy' : 'degraded' : 'incident'); });
+  const mountRows = Object.entries(snapshot.mounts?.checks || {}).map(([name, check]) => row(name, `${check.error || 'Read test passed'} · checked ${when(check.checkedAt)} · last successful ${when(check.lastKnownGood)} · last error ${when(check.lastFailure)} · ${number(check.consecutiveFailures || 0)} consecutive failures`, `${number(check.latencyMs)} ms`, check.status || 'unknown', 'mount'));
   $('systemChecks').innerHTML = [...healthRows, ...mountRows].join('') || row('No system checks', 'Optional source data is unavailable.', 'Unknown', 'unknown');
 }
 
 function usage(snapshot) {
   const periods = snapshot.usage?.periods || {};
-  $('usage').innerHTML = [['Vandaag', periods.daily], ['Week', periods.weekly], ['Maand', periods.monthly], ['Jaar', periods.yearly], ['Dashboard totaal', periods.allTime]].map(([name, value]) => `<div class="usage-card"><span>${name}</span><strong>${bytes(value?.totalBytes)}</strong><span>in ${bytes(value?.rxBytes)} · uit ${bytes(value?.txBytes)}</span></div>`).join('');
+  $('usage').innerHTML = [[t('today'), periods.daily], [t('week'), periods.weekly], [t('month'), periods.monthly], [t('year'), periods.yearly], [t('dashboardTotal'), periods.allTime]].map(([name, value]) => `<div class="usage-card"><span>${name}</span><strong>${bytes(value?.totalBytes)}</strong><span>${t('traffic',{incoming:bytes(value?.rxBytes),outgoing:bytes(value?.txBytes)})}</span></div>`).join('');
 }
 
 function logs(snapshot) { $('logBox').textContent = (snapshot.logs?.[state.logType] || []).join('\n') || 'No log lines in this source.'; }
 
 function actions(snapshot) {
   $('serviceLinks').innerHTML = Object.entries(snapshot.links || {}).map(([name, url]) => `<a href="${esc(url)}" target="_blank" rel="noreferrer">${esc(name)}</a>`).join('') || '<span class="muted">No service links configured.</span>';
-  const buttons = [['run-verifier', 'Verifier draaien'], ['run-periodic', 'Periodic search'], ['run-watchdog', 'Mountcontrole']];
-  for (const container of snapshot.containers || []) buttons.push([`restart-container|${container.name}`, `Herstart ${container.name}`]);
-  $('actions').innerHTML = buttons.map(([value, text]) => { const [action, target] = value.split('|'); return `<button type="button" data-action="${action}" data-target="${esc(target || '')}" data-confirm="${action === 'restart-container' || action === 'run-watchdog' ? 'Deze beheeractie uitvoeren?' : ''}">${esc(text)}</button>`; }).join('');
+  const buttons = [['run-verifier', t('runVerifier')], ['run-periodic', t('runPeriodic')], ['run-watchdog', t('runMountCheck')]];
+  for (const container of snapshot.containers || []) buttons.push([`restart-container|${container.name}`, t('restart',{name:container.name})]);
+  $('actions').innerHTML = buttons.map(([value, text]) => { const [action, target] = value.split('|'); return `<button type="button" data-action="${action}" data-target="${esc(target || '')}" data-confirm="${action === 'restart-container' || action === 'run-watchdog' ? t('confirmManagement') : ''}">${esc(text)}</button>`; }).join('');
 }
 
 function openDetail(kind) {
   if (!state.snapshot) return;
   const snapshot = state.snapshot; const title = $('modalTitle'); let rows = [];
-  title.textContent = ({ queues: 'Queue-details', mount: 'Mount read-tests', providers: 'Providers', repairs: 'Repairs', incidents: 'Incidents', trends: 'History' })[kind] || 'Statusdetails';
+  title.textContent = ({ queues: t('queueDetails'), mount: t('mountReadTests'), providers: t('providers'), repairs: t('repairs'), incidents: t('incidents'), trends: t('history') })[kind] || t('statusDetails');
   if (kind === 'queues') for (const key of ['sonarr', 'radarr', 'nzbdav']) for (const item of snapshot.queues?.[key]?.records || snapshot.queues?.[key]?.rows || []) rows.push([key, item.state, item.title || '–', item.progress === null ? '–' : `${Math.round(item.progress)}%`, item.ageMinutes === null ? '–' : `${item.ageMinutes} min`, item.eta || '–']);
   else if (kind === 'mount') rows = Object.entries(snapshot.mounts?.checks || {}).map(([key, value]) => [key, label(value.status), `${number(value.latencyMs)} ms`, value.error || 'OK', when(value.checkedAt)]);
   else if (kind === 'providers') rows = (snapshot.providers || []).map((item) => [item.name, label(item.status), item.trips, item.missingArticles, item.source]);
-  else if (kind === 'containers') rows = (snapshot.containers || []).map((item) => [item.name, item.status, item.health || 'geen healthcheck', `${number(item.restartCount)} restarts`, when(item.startedAt)]);
+  else if (kind === 'containers') rows = (snapshot.containers || []).map((item) => [item.name, item.status, item.health || t('noHealthcheck'), `${number(item.restartCount)} restarts`, when(item.startedAt)]);
   else if (kind === 'incidents') rows = [...(snapshot.incidents?.active || []), ...(snapshot.incidents?.historical || [])].map((item) => [label(item.active ? 'incident' : 'healthy'), item.title, item.source, when(item.firstSeen), when(item.lastSeen), item.advice]);
   else if (kind === 'repairs') rows = (snapshot.repairs?.runs || []).map((run) => [when(run.started), `${number(run.repairs)} repairs`, `${number(run.streamChecks)} checks`, when(run.ended)]);
   $('modalBody').innerHTML = rows.length ? `<div class="table-scroll"><table class="detail-table"><tbody>${rows.map((cells) => `<tr>${cells.map((cell) => `<td>${esc(cell)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '<p class="muted">No details available.</p>';
@@ -194,9 +195,9 @@ function openDetail(kind) {
 
 async function runAction(action, target, confirmText) {
   if (state.busy || (confirmText && !confirm(confirmText))) return;
-  state.busy = true; $('actionStatus').textContent = 'Actie wordt uitgevoerd…';
-  try { const response = await fetch('/api/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, target }) }); const value = await response.json(); $('actionStatus').textContent = value.message || value.error || (value.ok ? 'Gestart' : 'Mislukt'); if (value.ok) await load(true); }
-  catch (error) { $('actionStatus').textContent = `Fout: ${error.message}`; }
+  state.busy = true; $('actionStatus').textContent = 'Action is running…';
+  try { const response = await fetch('/api/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, target }) }); const value = await response.json(); $('actionStatus').textContent = value.message || value.error || t(value.ok?'started':'failed'); if (value.ok) await load(true); }
+  catch (error) { $('actionStatus').textContent = `${t('error')}: ${error.message}`; }
   finally { state.busy = false; }
 }
 

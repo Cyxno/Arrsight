@@ -10,4 +10,7 @@
   <Config Name="NZBDav or InfiniDysk" Target="/nzbdav" Default="/mnt/user/nzbdav" Mode="ro" Description="Optional read-only NZBDav or InfiniDysk mount." Type="Path" Display="always" Required="false" Mask="false">/mnt/user/nzbdav</Config>
   <Config Name="Docker socket" Target="/var/run/docker.sock" Default="/var/run/docker.sock" Mode="ro" Description="Optional. Grants powerful Docker access even when bound read-only; only add for container monitoring or management." Type="Path" Display="advanced" Required="false" Mask="false">/var/run/docker.sock</Config>
   <Config Name="Config directory" Target="CONFIG_DIR" Default="/config" Mode="" Description="Persistent configuration directory." Type="Variable" Display="advanced" Required="true" Mask="false">/config</Config>
+  <Config Name="User ID" Target="PUID" Default="99" Mode="" Description="UID used by the non-root ArrSight process." Type="Variable" Display="advanced" Required="true" Mask="false">99</Config>
+  <Config Name="Group ID" Target="PGID" Default="100" Mode="" Description="GID used by the non-root ArrSight process." Type="Variable" Display="advanced" Required="true" Mask="false">100</Config>
+  <Config Name="File umask" Target="UMASK" Default="0022" Mode="" Description="Umask applied to files created by ArrSight." Type="Variable" Display="advanced" Required="true" Mask="false">0022</Config>
 </Container>

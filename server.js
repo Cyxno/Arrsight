@@ -6,7 +6,10 @@ import { fileURLToPath } from 'node:url';
 import { buildAttentionItems, buildIncidents, classifyOverview, classifyQueue, deriveProviders, metricPoint, parseOperationalHistory, pruneHistory, reconcileIncidentHistory, trend, verifierSummary } from './lib/telemetry.js';
 import { runMountReadTest, updateMountState } from './lib/mount-check.js';
 import crypto from 'node:crypto';
-import { atomicWrite, defaults as defaultConfig, deepMerge, integrations, migrateConfig, migrateLegacyFiles, publicConfig, validateConfig, validateMountPath, applySecretUpdates } from './lib/config.js';
+import { atomicWrite, defaults as defaultConfig, deepMerge, integrations, migrateConfig, migrateLegacyFiles, publicConfig, validateConfig, validateMountPath, applySecretUpdates, normalizeConfigInput } from './lib/config.js';
+import { cookieValue, hashPassword, sessionStore, verifyPassword } from './lib/auth.js';
+import { testIntegration } from './lib/integrations.js';
+import packageJson from './package.json' with { type: 'json' };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
@@ -21,6 +24,7 @@ let config = defaultConfig;
 let configured = false;
 let setupCode = null;
 let setupCodeExpiresAt = 0;
+const sessions=sessionStore(); const failedLogins=new Map();
 let lastSnapshot = null;
 let lastSnapshotAt = 0;
 let usageWriteQueue = Promise.resolve();
@@ -50,12 +54,13 @@ async function loadConfig() {
   if (migratedFiles.length) console.log(`Migrated runtime files to ${configDir}: ${migratedFiles.join(', ')}`);
   try {
     const raw = await fs.readFile(configPath, 'utf8');
-    config = migrateConfig(JSON.parse(raw)); configured = true;
+    config = migrateConfig(JSON.parse(raw)); configured = true;if(!config.admin?.passwordHash){setupCode=crypto.randomBytes(18).toString('base64url');setupCodeExpiresAt=Date.now()+30*60*1000;console.log(`ArrSight administrator upgrade code (valid for 30 minutes): ${setupCode}`);}
   } catch {
     config = structuredClone(defaultConfig); configured = false;
     setupCode = crypto.randomBytes(18).toString('base64url'); setupCodeExpiresAt = Date.now()+30*60*1000;
     console.log(`ArrSight first-run setup code (valid for 30 minutes): ${setupCode}`);
   }
+  if(process.env.PORT)config.port=Number(process.env.PORT)||config.port;
 }
 
 function sendJson(res, status, body) {
@@ -514,10 +519,10 @@ function parseAttentionEvents(sources) {
     },
     {
       id: 'single-provider',
-      title: 'Maar 1 provider gebruikt',
+      title: 'Only one provider used',
       severity: 'warning',
       area: 'Usenet providers',
-      advice: 'Fallback wordt niet gebruikt of is niet eligible. Check providerconfig als missing articles blijven oplopen.',
+      advice: 'The fallback is not being used or is ineligible. Check provider settings if missing articles keep increasing.',
       test: /EligibleProviders:\s*1\b/i
     },
     {
@@ -525,7 +530,7 @@ function parseAttentionEvents(sources) {
       title: 'Missing articles / DMCA',
       severity: 'warning',
       area: 'NZB health',
-      advice: 'Normaal bij takedowns. Belangrijk wordt het als dezelfde titel vaak terugkomt of geen 1080p fallback pakt.',
+      advice: 'This is normal after takedowns. Investigate if the same title recurs or no 1080p fallback is selected.',
       test: /Missing articles|No Such Article|First segment .* missing|Article with message-id .* not found/i
     },
     {
@@ -533,7 +538,7 @@ function parseAttentionEvents(sources) {
       title: 'Repair / blocklist actie',
       severity: 'info',
       area: 'Repair flow',
-      advice: 'Dit is meestal goed: kapotte release wordt verwijderd/geblocklist en opnieuw gezocht.',
+      advice: 'This is usually expected: the broken release is removed or blocklisted and searched again.',
       test: /bad_import_queue_delete|failed_queue_delete|RemoveAndBlocklist|RemoveAndBlocklistAndSearch|sonarr_bad|radarr_bad|_delete file_id=/i
     },
     {
@@ -541,7 +546,7 @@ function parseAttentionEvents(sources) {
       title: 'Import blijft hangen',
       severity: 'critical',
       area: 'Sonarr/Radarr import',
-      advice: 'Completed/importPending of sample-detectie blijft hangen. Periodic cleanup hoort dit te verwijderen en opnieuw te zoeken.',
+      advice: 'Completed/importPending or sample detection is stuck. Periodic cleanup should remove it and search again.',
       test: /importPending|Unable to determine if file is a sample|No files found are eligible for import|Failed to import|path does not exist|not accessible by (Sonarr|Radarr)/i
     },
     {
@@ -554,26 +559,26 @@ function parseAttentionEvents(sources) {
     },
     {
       id: 'search-limit',
-      title: 'Replacement limit bereikt',
+      title: 'Replacement limit reached',
       severity: 'warning',
       area: 'Search loop',
-      advice: 'Er zijn te veel kapotte releases geprobeerd. Check of er nog acceptabele 720p/1080p releases beschikbaar zijn.',
+      advice: 'Too many broken releases were attempted. Check whether acceptable 720p/1080p releases remain available.',
       test: /Automatic replacement-search limit reached|no_untried_viable_release/i
     },
     {
       id: 'mount-watchdog',
-      title: 'Mount/watchdog herstel',
+      title: 'Mount/watchdog recovery',
       severity: 'warning',
       area: 'Mount',
-      advice: 'Mount was stale/missing of containers zagen hem niet. Als dit vaak terugkomt: rclone/watchdog verder aanscherpen.',
+      advice: 'The mount was stale or missing, or containers could not see it. Tighten rclone or watchdog checks if this recurs.',
       test: /stale|missing or stale|does not see .*restarting|not mounted|recovered|Backend proxy failed|ECONNRESET/i
     },
     {
       id: 'corrupt-media',
-      title: 'Corrupt/onleesbare media',
+      title: 'Corrupt or unreadable media',
       severity: 'critical',
       area: 'Playback',
-      advice: 'Bestand is niet betrouwbaar afspeelbaar. Hoort door repair/verifier verwijderd en opnieuw gezocht te worden.',
+      advice: 'The file is not reliably playable. The repair or verifier job should remove it and search again.',
       test: /unreadable media|corrupt RAR|Corrupt file|EBML header|Invalid data found|gap-fill|decoded .* short/i
     },
     {
@@ -636,7 +641,7 @@ function parseAttentionEvents(sources) {
 }
 
 function attentionSubject(id, line, sourceName) {
-  if (id === 'single-provider') return `${sourceName}: fallback provider niet gebruikt`;
+  if (id === 'single-provider') return `${sourceName}: fallback provider not used`;
   if (/Usenet segment was unavailable/i.test(line)) return 'Usenet segment unavailable';
   if (/Article with message-id .* not found/i.test(line) && !/\/content\//i.test(line)) return 'Article not found';
   return extractTitle(line);
@@ -694,8 +699,8 @@ function buildChain(snapshot) {
     node('infinidysk', 'InfiniDysk', snapshot.queues.nzbdav.ok ? (snapshot.queues.nzbdav.failed ? 'incident' : 'healthy') : 'incident', null, snapshot.queues.nzbdav.ok ? snapshot.generatedAt : null),
     node('mount', 'WebDAV-mount', snapshot.mounts.overall, snapshot.mounts.maxLatencyMs, snapshot.mounts.lastKnownGood),
     node('library', 'Import / library', !snapshot.queues.sonarr.ok || !snapshot.queues.radarr.ok ? 'unknown' : snapshot.queues.sonarr.failed + snapshot.queues.radarr.failed ? 'incident' : snapshot.queues.sonarr.stalled + snapshot.queues.radarr.stalled ? 'degraded' : 'healthy', null, snapshot.queues.sonarr.ok && snapshot.queues.radarr.ok ? snapshot.generatedAt : null),
-    node('bazarr', 'Bazarr', snapshot.bazarr.ok ? 'healthy' : bazarrContainer && !bazarrContainer.ok ? 'incident' : 'unknown', null, snapshot.bazarr.ok ? snapshot.generatedAt : null, snapshot.bazarr.ok ? null : 'API niet bevestigd'),
-    node('plex', 'Plex-container', !plex ? 'unknown' : plex.ok && plex.health !== 'unhealthy' ? 'healthy' : 'incident', null, plex?.ok ? snapshot.generatedAt : null, !plex ? 'Niet geconfigureerd' : plex.ok ? null : 'Container niet actief')
+    node('bazarr', 'Bazarr', snapshot.bazarr.ok ? 'healthy' : bazarrContainer && !bazarrContainer.ok ? 'incident' : 'unknown', null, snapshot.bazarr.ok ? snapshot.generatedAt : null, snapshot.bazarr.ok ? null : 'API not confirmed'),
+    node('plex', 'Plex container', !plex ? 'unknown' : plex.ok && plex.health !== 'unhealthy' ? 'healthy' : 'incident', null, plex?.ok ? snapshot.generatedAt : null, !plex ? 'Not configured' : plex.ok ? null : 'Container not active')
   ];
 }
 
@@ -954,7 +959,7 @@ async function buildSnapshotOnce(force = false) {
   snapshot.attentionItems = buildAttentionItems(snapshot);
   const currentByKey = new Map(snapshot.attentionItems.map((item) => [item.key, item]));
   const lifecycle = reconcileIncidentHistory(operationalHistory.incidents, snapshot.attentionItems.map((item) => ({ fingerprint: item.key, id: item.type, title: item.title, severity: item.severity, area: item.tab, source: item.source, firstSeen: item.firstSeen, lastSeen: item.lastSeen, count: 1 })), new Date(), config.monitoring.resolvedHours, config.monitoring.retentionDays);
-  const enrich = (item) => ({ ...item, advice: currentByKey.get(item.fingerprint)?.advice || 'Het probleem is niet meer actief.', detail: currentByKey.get(item.fingerprint)?.detail || 'incidents' });
+  const enrich = (item) => ({ ...item, advice: currentByKey.get(item.fingerprint)?.advice || 'The problem is no longer active.', detail: currentByKey.get(item.fingerprint)?.detail || 'incidents' });
   snapshot.incidents = { ...snapshot.incidents, active: lifecycle.active.map(enrich), resolved: lifecycle.resolved.map(enrich), historical: lifecycle.historical.map(enrich) };
   snapshot.overview = classifyOverview(snapshot);
   snapshot.history = await recordMetrics(snapshot);
@@ -994,27 +999,35 @@ async function serveStatic(req, res) {
 
 async function handler(req, res) {
   const url = new URL(req.url, 'http://localhost');
+  const methods={'/api/health':['GET'],'/api/config':['GET','PUT'],'/api/auth/status':['GET'],'/api/auth/login':['POST'],'/api/auth/logout':['POST'],'/api/test/path':['POST'],'/api/test/integration':['POST'],'/api/action':['POST'],'/api/snapshot':['GET'],'/api/logs':['GET']};if(methods[url.pathname]&&!methods[url.pathname].includes(req.method))return sendJson(res,405,{ok:false,code:'method_not_allowed'});
   const sameOrigin=()=>{ const origin=req.headers.origin; if(!origin) return false; try{return new URL(origin).host===req.headers.host;}catch{return false;} };
-  if (url.pathname === '/api/health') return sendJson(res, configured ? 200 : 503, { status: configured?'ok':'setup_required', service:'ArrSight', version:'1.1.0' });
-  if (url.pathname === '/api/config' && req.method === 'GET') return sendJson(res,200,{configured,config:publicConfig(config)});
+  const authenticated=()=>sessions.valid(cookieValue(req.headers.cookie));
+  const adminReady=()=>Boolean(config.admin?.passwordHash);
+  if(url.pathname==='/api/auth/status'&&req.method==='GET')return sendJson(res,200,{authenticated:authenticated(),required:configured&&adminReady()});
+  if(url.pathname==='/api/auth/login'&&req.method==='POST'){if(!sameOrigin())return sendJson(res,403,{ok:false,code:'cross_origin'});const key=req.socket.remoteAddress||'unknown',attempt=failedLogins.get(key)||{count:0,until:0};if(attempt.until>Date.now())return sendJson(res,429,{ok:false,code:'rate_limited'});const body=await readJsonBody(req);if(!await verifyPassword(body?.password,config.admin?.passwordHash)){attempt.count++;attempt.until=attempt.count>=5?Date.now()+60000:0;failedLogins.set(key,attempt);return sendJson(res,401,{ok:false,code:'invalid_credentials'});}failedLogins.delete(key);const token=sessions.create();res.setHeader('set-cookie',`arrsight_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800`);return sendJson(res,200,{ok:true});}
+  if(url.pathname==='/api/auth/logout'&&req.method==='POST'){if(!sameOrigin())return sendJson(res,403,{ok:false,code:'cross_origin'});sessions.remove(cookieValue(req.headers.cookie));res.setHeader('set-cookie','arrsight_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');return sendJson(res,200,{ok:true});}
+  if (url.pathname === '/api/health') return sendJson(res, 200, { status: configured?'ok':'setup_required', service:'ArrSight', version:packageJson.version });
+  if (url.pathname === '/api/config' && req.method === 'GET') {if(configured&&adminReady()&&!authenticated())return sendJson(res,401,{configured:true,code:'authentication_required'});return sendJson(res,200,{configured,config:publicConfig(config)});}
   if (url.pathname === '/api/config' && req.method === 'PUT') {
     if(!sameOrigin()) return sendJson(res,403,{ok:false,code:'cross_origin'});
     const body=await readJsonBody(req); if(!body||typeof body!=='object') return sendJson(res,400,{ok:false,code:'invalid_json'});
-    if(!configured && (body.setupCode!==setupCode || Date.now()>setupCodeExpiresAt)) return sendJson(res,403,{ok:false,code:Date.now()>setupCodeExpiresAt?'setup_code_expired':'setup_code_invalid'});
-    const allowed=['locale','managementMode','monitoring','paths','dockerSocket','containers','links',...integrations]; const candidate={}; for(const key of allowed) if(key in body) candidate[key]=body[key];
+    if((!configured||!adminReady()) && (body.setupCode!==setupCode || Date.now()>setupCodeExpiresAt)) return sendJson(res,403,{ok:false,code:Date.now()>setupCodeExpiresAt?'setup_code_expired':'setup_code_invalid'});
+    if(configured&&adminReady()&&!authenticated())return sendJson(res,401,{ok:false,code:'authentication_required'});
+    const {setupCode:_setupCode,adminPassword:_adminPassword,...configBody}=body;const normalized=normalizeConfigInput(configBody);if(normalized.errors.length)return sendJson(res,400,{ok:false,code:'validation_failed',errors:normalized.errors});const candidate=normalized.value;
     const next=applySecretUpdates(migrateConfig(deepMerge(config,candidate)),config); const errors=validateConfig(next); if(errors.length) return sendJson(res,400,{ok:false,code:'validation_failed',errors});
+    if(!adminReady()){try{next.admin={passwordHash:await hashPassword(body.adminPassword)};}catch{return sendJson(res,400,{ok:false,code:'invalid_admin_password'});}}
     await atomicWrite(configPath,next); config=next; configured=true; setupCode=null; setupCodeExpiresAt=0; lastSnapshot=null; lastSnapshotAt=0;
     return sendJson(res,200,{ok:true,config:publicConfig(config)});
   }
   if (url.pathname === '/api/test/path' && req.method === 'POST') {
-    if(!sameOrigin()) return sendJson(res,403,{ok:false,code:'cross_origin'}); const body=await readJsonBody(req);
+    if(!sameOrigin()) return sendJson(res,403,{ok:false,code:'cross_origin'});if(configured&&adminReady()&&!authenticated())return sendJson(res,401,{ok:false,code:'authentication_required'}); const body=await readJsonBody(req);
     if(!validateMountPath(body?.path,body?.category)) return sendJson(res,400,{ok:false,code:'path_not_allowed'});
     try{ await fs.access(path.resolve(body.path),fsConstants.R_OK); return sendJson(res,200,{ok:true,code:'path_readable'}); }catch{return sendJson(res,400,{ok:false,code:'path_unreadable'});}
   }
   if (url.pathname === '/api/test/integration' && req.method === 'POST') {
-    if(!sameOrigin()) return sendJson(res,403,{ok:false,code:'cross_origin'}); const body=await readJsonBody(req); if(!integrations.includes(body?.name)) return sendJson(res,400,{ok:false,code:'unknown_integration'});
+    if(!sameOrigin()) return sendJson(res,403,{ok:false,code:'cross_origin'});if(configured&&adminReady()&&!authenticated())return sendJson(res,401,{ok:false,code:'authentication_required'}); const body=await readJsonBody(req); if(!integrations.includes(body?.name)) return sendJson(res,400,{ok:false,code:'unknown_integration'});
     const merged=deepMerge(config[body.name]||{},body.settings||{}); if(!merged.apiKey) merged.apiKey=config[body.name]?.apiKey||''; if(validateConfig({...config,[body.name]:merged}).length) return sendJson(res,400,{ok:false,code:'validation_failed'});
-    const target=String(merged.url||'').replace(/\/$/,''); if(!target) return sendJson(res,400,{ok:false,code:'url_required'}); const result=await fetchJson(target,{timeoutMs:5000}); return sendJson(res,result.ok?200:502,{ok:result.ok,code:result.ok?'connection_ok':'connection_failed',status:result.status});
+    if(!merged.url)return sendJson(res,400,{ok:false,code:'url_required'});const result=await testIntegration(body.name,merged,fetchJson);return sendJson(res,result.ok?200:502,result);
   }
   if (url.pathname === '/api/action' && req.method === 'POST') {
     if(!sameOrigin()) return sendJson(res,403,{ok:false,code:'cross_origin'});
