@@ -27,7 +27,7 @@ jobs:
         if: github.event_name != 'pull_request'
         with: {registry: ghcr.io, username: '${{ github.actor }}', password: '${{ secrets.GITHUB_TOKEN }}'}
       - id: package
-        run: echo "result=$(node -p 'JSON.stringify(require(\"./package.json\"))')" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(node -p 'require(\"./package.json\").version')" >> "$GITHUB_OUTPUT"
       - id: meta
         uses: docker/metadata-action@v5
         with:
@@ -47,5 +47,5 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
-            VERSION=${{ fromJSON(steps.package.outputs.result).version }}
+            VERSION=${{ steps.package.outputs.version }}
             VCS_REF=${{ github.sha }}
