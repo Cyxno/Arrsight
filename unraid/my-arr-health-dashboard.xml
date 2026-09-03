@@ -1,26 +1,13 @@
 <?xml version="1.0"?>
 <Container version="2">
-  <Name>arr-health-dashboard</Name>
-  <Repository>node:20-alpine</Repository>
-  <Registry>https://hub.docker.com/_/node</Registry>
-  <Network>host</Network>
-  <MyIP/>
-  <Shell>sh</Shell>
-  <Privileged>false</Privileged>
-  <Overview>Remco&apos;s &apos;Arr monitoring tool for Sonarr, Radarr, NzbDAV, Bazarr and Plex health checks, logs and safe manual actions.</Overview>
-  <Category>MediaApp:Video Status:Stable</Category>
-  <WebUI>http://[IP]:[PORT:8090]/</WebUI>
-  <Icon>http://192.168.1.2:8090/icon.png</Icon>
-  <ExtraParams>--label net.unraid.docker.icon=http://192.168.1.2:8090/icon.png --label net.unraid.docker.webui=http://192.168.1.2:8090/ --label org.opencontainers.image.title=&quot;Remco Arr monitoring tool&quot;</ExtraParams>
-  <PostArgs>node /app/server.js</PostArgs>
-  <CPUset/>
-  <DateInstalled>1784890800</DateInstalled>
-  <DonateText/>
-  <DonateLink/>
-  <Requires/>
-  <Config Name="Appdata" Target="/app" Default="/mnt/user/appdata/arr-health-dashboard" Mode="rw" Description="Dashboard application and queued host actions." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/arr-health-dashboard</Config>
-  <Config Name="All appdata logs" Target="/data" Default="/mnt/user/appdata" Mode="ro" Description="Read-only access to app logs." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata</Config>
-  <Config Name="Symlinks" Target="/symlinks" Default="/mnt/vm_storage/symlinks" Mode="ro" Description="Read-only access to media symlinks." Type="Path" Display="always" Required="true" Mask="false">/mnt/vm_storage/symlinks</Config>
-  <Config Name="NzbDAV mount" Target="/nzbdav" Default="/mnt/remote/nzbdav" Mode="ro" Description="Read-only NzbDAV mount status." Type="Path" Display="always" Required="true" Mask="false">/mnt/remote/nzbdav</Config>
-  <Config Name="Docker socket" Target="/var/run/docker.sock" Default="/var/run/docker.sock" Mode="ro" Description="Read-only Docker status and controlled restart actions." Type="Path" Display="advanced" Required="true" Mask="false">/var/run/docker.sock</Config>
+  <Name>ArrSight</Name><Repository>ghcr.io/cyxno/arrsight:latest</Repository><Registry>https://ghcr.io/cyxno/arrsight</Registry><Network>bridge</Network><Shell>sh</Shell><Privileged>false</Privileged>
+  <Overview>ArrSight — Media stack health, at a glance. Optional monitoring for Sonarr, Radarr, Bazarr, Plex, Jellyfin, InfiniDysk, NZBDav, Docker, mounts, and logs.</Overview><Category>MediaApp:Video Status:Stable</Category><WebUI>http://[IP]:[PORT:8090]/</WebUI><Icon>https://raw.githubusercontent.com/Cyxno/arr-health-dashboard/main/public/arrsight-icon-256.png</Icon>
+  <Config Name="Web UI" Target="8090" Default="8090" Mode="tcp" Description="ArrSight web port." Type="Port" Display="always" Required="true" Mask="false">8090</Config>
+  <Config Name="Configuration" Target="/config" Default="/mnt/user/appdata/arrsight" Mode="rw" Description="Configuration and operational history." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/arrsight</Config>
+  <Config Name="Application logs" Target="/data" Default="/mnt/user/appdata" Mode="ro" Description="Optional read-only service and verifier logs." Type="Path" Display="always" Required="false" Mask="false">/mnt/user/appdata</Config>
+  <Config Name="TV media" Target="/media/tv" Default="/mnt/user/media/tv" Mode="ro" Description="Optional read-only TV mount." Type="Path" Display="always" Required="false" Mask="false">/mnt/user/media/tv</Config>
+  <Config Name="Movie media" Target="/media/movies" Default="/mnt/user/media/movies" Mode="ro" Description="Optional read-only movie mount." Type="Path" Display="always" Required="false" Mask="false">/mnt/user/media/movies</Config>
+  <Config Name="NZBDav or InfiniDysk" Target="/nzbdav" Default="/mnt/user/nzbdav" Mode="ro" Description="Optional read-only NZBDav or InfiniDysk mount." Type="Path" Display="always" Required="false" Mask="false">/mnt/user/nzbdav</Config>
+  <Config Name="Docker socket" Target="/var/run/docker.sock" Default="/var/run/docker.sock" Mode="ro" Description="Optional. Grants powerful Docker access even when bound read-only; only add for container monitoring or management." Type="Path" Display="advanced" Required="false" Mask="false">/var/run/docker.sock</Config>
+  <Config Name="Config directory" Target="CONFIG_DIR" Default="/config" Mode="" Description="Persistent configuration directory." Type="Variable" Display="advanced" Required="true" Mask="false">/config</Config>
 </Container>

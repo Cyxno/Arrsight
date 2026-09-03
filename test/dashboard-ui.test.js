@@ -74,9 +74,10 @@ test('server attention list is the single source for badges banner and recommend
 
 test('HTML keeps light, dark and system theme choices and accessible panels', async () => {
   const html = await fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8');
-  assert.match(html, /value="auto">Systeem/);
-  assert.match(html, /value="light">Licht/);
-  assert.match(html, /value="dark">Donker/);
+  assert.match(html, /value="auto"[^>]*>System/);
+  assert.match(html, /value="light"[^>]*>Light/);
+  assert.match(html, /value="dark"[^>]*>Dark/);
+  assert.match(html, /id="localeSelect"/);
   assert.equal((html.match(/data-panel="/g) || []).length, 4);
 });
 

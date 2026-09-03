@@ -1,28 +1,13 @@
 {
-  "port": 8090,
-  "sonarr": {
-    "url": "http://127.0.0.1:7854",
-    "apiKey": "SONARR_API_KEY"
-  },
-  "radarr": {
-    "url": "http://127.0.0.1:7878",
-    "apiKey": "RADARR_API_KEY"
-  },
-  "nzbdav": {
-    "url": "http://127.0.0.1:3001",
-    "apiKey": "NZBDAV_API_KEY"
-  },
-  "bazarr": {
-    "url": "http://127.0.0.1:6767",
-    "apiKey": "BAZARR_API_KEY"
-  },
-  "monitoring": {
-    "sampleMinutes": 5,
-    "retentionDays": 90,
-    "resolvedHours": 72,
-    "queueStaleMinutes": 30,
-    "queueFailedMinutes": 120,
-    "mountWarnMs": 1500,
-    "mountTimeoutMs": 5000
-  }
+  "configVersion": 2,
+  "productName": "ArrSight",
+  "locale": "en",
+  "managementMode": "monitoring",
+  "sonarr": {"enabled": true, "url": "http://sonarr:8989", "apiKey": ""},
+  "radarr": {"enabled": true, "url": "http://radarr:7878", "apiKey": ""},
+  "bazarr": {"enabled": false, "url": "http://bazarr:6767", "apiKey": ""},
+  "plex": {"enabled": false, "url": "http://plex:32400", "apiKey": ""},
+  "jellyfin": {"enabled": false, "url": "http://jellyfin:8096", "apiKey": ""},
+  "nzbdav": {"enabled": false, "url": "http://nzbdav:3000", "apiKey": ""},
+  "paths": {"tvRoot": "/media/tv", "movieRoot": "/media/movies", "nzbdavMount": "/nzbdav"}
 }

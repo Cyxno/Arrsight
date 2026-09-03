@@ -1,50 +1,26 @@
 import http from 'node:http';
 import fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildAttentionItems, buildIncidents, classifyOverview, classifyQueue, deriveProviders, metricPoint, parseOperationalHistory, pruneHistory, reconcileIncidentHistory, trend, verifierSummary } from './lib/telemetry.js';
 import { runMountReadTest, updateMountState } from './lib/mount-check.js';
+import crypto from 'node:crypto';
+import { atomicWrite, defaults as defaultConfig, deepMerge, integrations, migrateConfig, migrateLegacyFiles, publicConfig, validateConfig, validateMountPath, applySecretUpdates } from './lib/config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
-const configPath = path.join(__dirname, 'config.json');
-const usageHistoryPath = path.join(__dirname, 'usage-history.json');
-const metricsHistoryPath = path.join(__dirname, 'metrics-history.json');
-const incidentHistoryPath = path.join(__dirname, 'incidents-history.json');
+const configDir = path.resolve(process.env.CONFIG_DIR || (__dirname === '/app' ? '/config' : __dirname));
+const configPath = path.join(configDir, 'config.json');
+const usageHistoryPath = path.join(configDir, 'usage-history.json');
+const metricsHistoryPath = path.join(configDir, 'metrics-history.json');
+const incidentHistoryPath = path.join(configDir, 'incidents-history.json');
 const usageMaxAttributionMs = 15 * 60 * 1000;
 
-const defaultConfig = {
-  port: 8090,
-  sonarr: { url: 'http://127.0.0.1:7854', apiKey: '' },
-  radarr: { url: 'http://127.0.0.1:7878', apiKey: '' },
-  nzbdav: { url: 'http://127.0.0.1:3001', apiKey: '' },
-  bazarr: { url: 'http://127.0.0.1:6767', apiKey: '' },
-  links: {
-    sonarr: 'http://192.168.1.2:7854',
-    radarr: 'http://192.168.1.2:7878',
-    bazarr: 'http://192.168.1.2:6767',
-    nzbdav: 'http://192.168.1.2:3001',
-    plex: 'http://192.168.1.2:32400/web',
-    seerr: 'http://192.168.1.2:5055'
-  },
-  paths: {
-    verifierLog: '/data/codex-arr-file-verifier/arr-file-integrity-verifier.log',
-    periodicLog: '/data/codex-arr-periodic-search/arr-periodic-search.log',
-    watchdogLog: '/data/NzbDAV/nzbdav-mount-watchdog.log',
-    rcloneLog: '/data/NzbDAV/rclone-mount.log',
-    bazarrLog: '/data/bazarr/log/bazarr.log',
-    actionDir: '/app/actions',
-    actionLog: '/data/arr-health-dashboard/action-runner.log',
-    tvRoot: '/symlinks/TV Shows',
-    movieRoot: '/symlinks/Movies',
-    nzbdavMount: '/nzbdav'
-  },
-  dockerSocket: '/var/run/docker.sock',
-  containers: ['InfiniDysk', 'binhex-sonarr', 'binhex-radarr', 'bazarr', 'binhex-plexpass'],
-  monitoring: { sampleMinutes: 5, retentionDays: 90, resolvedHours: 72, queueStaleMinutes: 30, queueFailedMinutes: 120, mountWarnMs: 1500, mountTimeoutMs: 5000 }
-};
-
 let config = defaultConfig;
+let configured = false;
+let setupCode = null;
+let setupCodeExpiresAt = 0;
 let lastSnapshot = null;
 let lastSnapshotAt = 0;
 let usageWriteQueue = Promise.resolve();
@@ -70,22 +46,16 @@ async function writeIncidentHistory(history) {
 }
 
 async function loadConfig() {
+  const migratedFiles = await migrateLegacyFiles(__dirname, configDir);
+  if (migratedFiles.length) console.log(`Migrated runtime files to ${configDir}: ${migratedFiles.join(', ')}`);
   try {
     const raw = await fs.readFile(configPath, 'utf8');
-    config = deepMerge(defaultConfig, JSON.parse(raw));
+    config = migrateConfig(JSON.parse(raw)); configured = true;
   } catch {
-    config = defaultConfig;
+    config = structuredClone(defaultConfig); configured = false;
+    setupCode = crypto.randomBytes(18).toString('base64url'); setupCodeExpiresAt = Date.now()+30*60*1000;
+    console.log(`ArrSight first-run setup code (valid for 30 minutes): ${setupCode}`);
   }
-}
-
-function deepMerge(base, override) {
-  const out = { ...base };
-  for (const [key, value] of Object.entries(override || {})) {
-    out[key] = value && typeof value === 'object' && !Array.isArray(value)
-      ? deepMerge(base[key] || {}, value)
-      : value;
-  }
-  return out;
 }
 
 function sendJson(res, status, body) {
@@ -816,7 +786,8 @@ async function queueHostAction(action) {
 }
 
 async function runAction(body) {
-  if (actionRunning) return { ok: false, status: 409, error: 'Er loopt al een beheeractie' };
+  if (config.managementMode === 'monitoring') return { ok:false,status:403,error:'Management is disabled' };
+  if (actionRunning) return { ok: false, status: 409, error: 'A management action is already running' };
   const action = body?.action;
   if (typeof action !== 'string' || action.length > 80) return { ok: false, status: 400, error: 'Ongeldige actie' };
   actionRunning = true;
@@ -828,6 +799,7 @@ async function runAction(body) {
     lastSnapshotAt = 0;
     return { ok: result.ok, status: result.status, action, target, message: result.ok ? `${target} restarted` : result.text };
   }
+  if (config.managementMode !== 'full') return {ok:false,status:403,error:'Full management mode is required'};
 
   const arrCommands = {
     'sonarr-missing-search': ['sonarr', 'MissingEpisodeSearch'],
@@ -909,16 +881,16 @@ async function buildSnapshotOnce(force = false) {
     nzbdavDockerLog,
     usage
   ] = await Promise.all([
-    dockerContainers(operationalHistory.containerRestarts),
-    arrHealth('sonarr'),
-    arrHealth('radarr'),
-    arrQueue('sonarr'),
-    arrQueue('radarr'),
-    wantedCounts('sonarr'),
-    wantedCounts('radarr'),
-    nzbdavQueue(),
-    bazarrProviders(),
-    mountStatus(operationalHistory.mounts),
+    config.monitoring.dockerEnabled ? dockerContainers(operationalHistory.containerRestarts) : Promise.resolve({reachable:undefined,containers:[],restartCounts:{}}),
+    config.sonarr.enabled ? arrHealth('sonarr') : Promise.resolve({enabled:false,reachable:undefined,ok:true}),
+    config.radarr.enabled ? arrHealth('radarr') : Promise.resolve({enabled:false,reachable:undefined,ok:true}),
+    config.sonarr.enabled ? arrQueue('sonarr') : Promise.resolve({ok:true,rows:[],total:0,active:0,stalled:0,failed:0}),
+    config.radarr.enabled ? arrQueue('radarr') : Promise.resolve({ok:true,rows:[],total:0,active:0,stalled:0,failed:0}),
+    config.sonarr.enabled ? wantedCounts('sonarr') : Promise.resolve({missing:null,cutoff:null}),
+    config.radarr.enabled ? wantedCounts('radarr') : Promise.resolve({missing:null,cutoff:null}),
+    (config.nzbdav.enabled||config.infinidysk.enabled) ? nzbdavQueue() : Promise.resolve({ok:true,rows:[],total:0,active:0,stalled:0,failed:0}),
+    config.bazarr.enabled ? bazarrProviders() : Promise.resolve({ok:true,enabled:false}),
+    config.monitoring.mountsEnabled ? mountStatus(operationalHistory.mounts) : Promise.resolve({checks:{},overall:'unknown',state:{},maxLatencyMs:0}),
     readTail(config.paths.verifierLog),
     readTail(config.paths.periodicLog),
     readTail(config.paths.watchdogLog),
@@ -961,7 +933,7 @@ async function buildSnapshotOnce(force = false) {
     repairs: verifier,
     periodic,
     attention,
-    incidents: { active: allIncidents.filter((incident) => incident.active), resolved: [], historical: [], rules: 'Actief is nu relevant; opgelost blijft 72 uur zichtbaar; historisch bevat oudere opgeloste occurrences binnen de retentie.' },
+    incidents: { active: allIncidents.filter((incident) => incident.active), resolved: [], historical: [], rules: 'Active is nu relevant; opgelost blijft 72 uur zichtbaar; historisch bevat oudere opgeloste occurrences binnen de retentie.' },
     usage,
     problems: {
       nzbdav: nzbdavProblems,
@@ -1000,7 +972,9 @@ async function buildSnapshot(force = false) {
 
 async function serveStatic(req, res) {
   const url = new URL(req.url, 'http://localhost');
-  let filePath = path.normalize(path.join(publicDir, url.pathname === '/' ? 'index.html' : url.pathname));
+  if (!configured && url.pathname === '/') { res.writeHead(302,{location:'/setup'}); return res.end(); }
+  const requested=url.pathname==='/setup'?'setup.html':url.pathname==='/'?'index.html':url.pathname;
+  let filePath = path.normalize(path.join(publicDir, requested));
   if (!filePath.startsWith(publicDir)) return sendText(res, 403, 'Forbidden');
   try {
     const data = await fs.readFile(filePath);
@@ -1009,7 +983,7 @@ async function serveStatic(req, res) {
       '.html': 'text/html; charset=utf-8',
       '.css': 'text/css; charset=utf-8',
       '.js': 'text/javascript; charset=utf-8',
-      '.json': 'application/json; charset=utf-8'
+      '.json': 'application/json; charset=utf-8', '.svg':'image/svg+xml', '.png':'image/png'
     }[ext] || 'application/octet-stream';
     res.writeHead(200, { 'content-type': type });
     res.end(data);
@@ -1020,13 +994,30 @@ async function serveStatic(req, res) {
 
 async function handler(req, res) {
   const url = new URL(req.url, 'http://localhost');
+  const sameOrigin=()=>{ const origin=req.headers.origin; if(!origin) return false; try{return new URL(origin).host===req.headers.host;}catch{return false;} };
+  if (url.pathname === '/api/health') return sendJson(res, configured ? 200 : 503, { status: configured?'ok':'setup_required', service:'ArrSight', version:'1.1.0' });
+  if (url.pathname === '/api/config' && req.method === 'GET') return sendJson(res,200,{configured,config:publicConfig(config)});
+  if (url.pathname === '/api/config' && req.method === 'PUT') {
+    if(!sameOrigin()) return sendJson(res,403,{ok:false,code:'cross_origin'});
+    const body=await readJsonBody(req); if(!body||typeof body!=='object') return sendJson(res,400,{ok:false,code:'invalid_json'});
+    if(!configured && (body.setupCode!==setupCode || Date.now()>setupCodeExpiresAt)) return sendJson(res,403,{ok:false,code:Date.now()>setupCodeExpiresAt?'setup_code_expired':'setup_code_invalid'});
+    const allowed=['locale','managementMode','monitoring','paths','dockerSocket','containers','links',...integrations]; const candidate={}; for(const key of allowed) if(key in body) candidate[key]=body[key];
+    const next=applySecretUpdates(migrateConfig(deepMerge(config,candidate)),config); const errors=validateConfig(next); if(errors.length) return sendJson(res,400,{ok:false,code:'validation_failed',errors});
+    await atomicWrite(configPath,next); config=next; configured=true; setupCode=null; setupCodeExpiresAt=0; lastSnapshot=null; lastSnapshotAt=0;
+    return sendJson(res,200,{ok:true,config:publicConfig(config)});
+  }
+  if (url.pathname === '/api/test/path' && req.method === 'POST') {
+    if(!sameOrigin()) return sendJson(res,403,{ok:false,code:'cross_origin'}); const body=await readJsonBody(req);
+    if(!validateMountPath(body?.path,body?.category)) return sendJson(res,400,{ok:false,code:'path_not_allowed'});
+    try{ await fs.access(path.resolve(body.path),fsConstants.R_OK); return sendJson(res,200,{ok:true,code:'path_readable'}); }catch{return sendJson(res,400,{ok:false,code:'path_unreadable'});}
+  }
+  if (url.pathname === '/api/test/integration' && req.method === 'POST') {
+    if(!sameOrigin()) return sendJson(res,403,{ok:false,code:'cross_origin'}); const body=await readJsonBody(req); if(!integrations.includes(body?.name)) return sendJson(res,400,{ok:false,code:'unknown_integration'});
+    const merged=deepMerge(config[body.name]||{},body.settings||{}); if(!merged.apiKey) merged.apiKey=config[body.name]?.apiKey||''; if(validateConfig({...config,[body.name]:merged}).length) return sendJson(res,400,{ok:false,code:'validation_failed'});
+    const target=String(merged.url||'').replace(/\/$/,''); if(!target) return sendJson(res,400,{ok:false,code:'url_required'}); const result=await fetchJson(target,{timeoutMs:5000}); return sendJson(res,result.ok?200:502,{ok:result.ok,code:result.ok?'connection_ok':'connection_failed',status:result.status});
+  }
   if (url.pathname === '/api/action' && req.method === 'POST') {
-    const origin = req.headers.origin;
-    if (origin) {
-      try {
-        if (new URL(origin).host !== req.headers.host) return sendJson(res, 403, { ok: false, error: 'Cross-origin acties zijn niet toegestaan' });
-      } catch { return sendJson(res, 403, { ok: false, error: 'Ongeldige Origin-header' }); }
-    }
+    if(!sameOrigin()) return sendJson(res,403,{ok:false,code:'cross_origin'});
     const body = await readJsonBody(req);
     const result = await runAction(body);
     return sendJson(res, result.status || (result.ok ? 200 : 400), result);
@@ -1040,9 +1031,7 @@ async function handler(req, res) {
     const type = url.searchParams.get('type') || 'verifier';
     return sendJson(res, 200, { type, lines: snapshot.logs[type] || [] });
   }
-  if (url.pathname === '/api/health') {
-    return sendJson(res, 200, { ok: true, generatedAt: new Date().toISOString() });
-  }
+  if (!configured && url.pathname.startsWith('/api/')) return sendJson(res,503,{ok:false,code:'setup_required'});
   return serveStatic(req, res);
 }
 
@@ -1052,8 +1041,10 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(config.port, '0.0.0.0', () => {
-  console.log(`Remco's 'Arr + InfiniDysk monitoring tool listening on http://0.0.0.0:${config.port}`);
+  console.log(`ArrSight listening on http://0.0.0.0:${config.port}`);
 });
+
+for(const signal of ['SIGTERM','SIGINT']) process.on(signal,()=>server.close(()=>process.exit(0)));
 
 setInterval(async () => {
   if (measurementRunning) return;

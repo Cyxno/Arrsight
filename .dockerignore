@@ -1,0 +1,12 @@
+.git
+.github
+node_modules
+test
+docs
+work
+*.log
+config.json
+*-history.json
+Dockerfile*
+README.md
+unraid

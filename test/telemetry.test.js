@@ -90,6 +90,10 @@ test('repeated connection limit is an active provider incident', () => {
   assert.equal(deriveProviders(events, buildIncidents(events, now), now)[0].status, 'incident');
 });
 
+test('release names filenames versions and IP-like text are not providers',()=>{const now=new Date('2026-09-03T12:00:00Z');for(const subject of ['Show.Name.S01E02.1080p-GROUP','movie.final.mkv','v1.2.3','203.0.113.42']){const events=[{id:'provider-trip',subject,line:`2026-09-03T11:00:00Z ${subject}`}];assert.deepEqual(deriveProviders(events,buildIncidents(events,now),now),[]);}});
+
+test('active incident snapshots do not increment occurrence count',()=>{const now=new Date('2026-09-03T10:00:00Z');const current={fingerprint:'api:x',id:'api-unreachable',count:1,lastSeen:now.toISOString()};const first=reconcileIncidentHistory([], [current], now);const repeated=reconcileIncidentHistory(first.entries,[{...current,lastSeen:'2026-09-03T10:05:00Z'}],new Date('2026-09-03T10:05:00Z'));assert.equal(repeated.active[0].count,1);assert.equal(repeated.active[0].firstSeen,first.active[0].firstSeen);});
+
 test('incident lifecycle preserves first seen and separates resolved from historical', () => {
   const first = reconcileIncidentHistory([], [{ fingerprint:'api:sonarr', id:'api-unreachable', title:'API down', severity:'critical', source:'test', firstSeen:'2026-09-01T00:00:00Z', lastSeen:'2026-09-01T00:00:00Z' }], new Date('2026-09-01T00:00:00Z'));
   const repeated = reconcileIncidentHistory(first.entries, [{ fingerprint:'api:sonarr', id:'api-unreachable', title:'API down', severity:'critical', source:'test', lastSeen:'2026-09-01T01:00:00Z' }], new Date('2026-09-01T01:00:00Z'));

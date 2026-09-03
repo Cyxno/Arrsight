@@ -20,7 +20,7 @@ h1, h2, p { margin:0; } h2 { font-size:20px; letter-spacing:-.02em; }
 
 .topbar { position:sticky; top:0; z-index:10; display:flex; justify-content:space-between; align-items:center; gap:1rem; padding:15px max(20px,calc((100vw - 1480px)/2)); border-bottom:1px solid var(--line); background:color-mix(in srgb,var(--bg) 78%,transparent); backdrop-filter:blur(22px); }
 .brand, .header-actions, .section-head, .dialog-head { display:flex; align-items:center; gap:12px; }
-.brand img { width:38px; height:38px; border-radius:10px; } .brand h1 { font-size:20px; } .header-actions { justify-content:flex-end; }
+.brand img { width:180px; height:auto; border-radius:0; } .brand h1 { font-size:20px; } .header-actions { justify-content:flex-end; }
 .primary-nav { position:sticky; top:69px; z-index:9; padding:10px max(20px,calc((100vw - 1480px)/2)); background:color-mix(in srgb,var(--bg) 78%,transparent); backdrop-filter:blur(22px); }
 .main-tabs { display:flex; width:max-content; min-width:min(100%,660px); max-width:100%; gap:4px; padding:4px; overflow-x:auto; scrollbar-width:none; border:1px solid var(--line); border-radius:15px; background:color-mix(in srgb,var(--surface2) 78%,transparent); }
 .main-tabs::-webkit-scrollbar { display:none; }
