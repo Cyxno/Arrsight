@@ -1013,7 +1013,7 @@ async function handler(req, res) {
     const body=await readJsonBody(req); if(!body||typeof body!=='object') return sendJson(res,400,{ok:false,code:'invalid_json'});
     if((!configured||!adminReady()) && (body.setupCode!==setupCode || Date.now()>setupCodeExpiresAt)) return sendJson(res,403,{ok:false,code:Date.now()>setupCodeExpiresAt?'setup_code_expired':'setup_code_invalid'});
     if(configured&&adminReady()&&!authenticated())return sendJson(res,401,{ok:false,code:'authentication_required'});
-    const {setupCode:_setupCode,adminPassword:_adminPassword,...configBody}=body;const normalized=normalizeConfigInput(configBody);if(normalized.errors.length)return sendJson(res,400,{ok:false,code:'validation_failed',errors:normalized.errors});const candidate=normalized.value;
+    const {setupCode:_setupCode,adminPassword:_adminPassword,configVersion:_configVersion,productName:_productName,port:_port,...configBody}=body;const normalized=normalizeConfigInput(configBody);if(normalized.errors.length)return sendJson(res,400,{ok:false,code:'validation_failed',errors:normalized.errors});const candidate=normalized.value;
     const next=applySecretUpdates(migrateConfig(deepMerge(config,candidate)),config); const errors=validateConfig(next); if(errors.length) return sendJson(res,400,{ok:false,code:'validation_failed',errors});
     if(!adminReady()){try{next.admin={passwordHash:await hashPassword(body.adminPassword)};}catch{return sendJson(res,400,{ok:false,code:'invalid_admin_password'});}}
     await atomicWrite(configPath,next); config=next; configured=true; setupCode=null; setupCodeExpiresAt=0; lastSnapshot=null; lastSnapshotAt=0;
@@ -1031,6 +1031,7 @@ async function handler(req, res) {
   }
   if (url.pathname === '/api/action' && req.method === 'POST') {
     if(!sameOrigin()) return sendJson(res,403,{ok:false,code:'cross_origin'});
+    if(configured&&adminReady()&&!authenticated())return sendJson(res,401,{ok:false,code:'authentication_required'});
     const body = await readJsonBody(req);
     const result = await runAction(body);
     return sendJson(res, result.status || (result.ok ? 200 : 400), result);
