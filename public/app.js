@@ -51,9 +51,10 @@ async function load(force = false) {
     state.snapshot = await response.json();
     render();
   } catch (error) {
+    if (error.message === 'HTTP 401') { location.href = '/setup'; return; }
     $('lastUpdated').textContent = `${t('unavailable')} · ${error.message}`;
     $('headerStatus').className = 'badge incident';
-    $('headerStatus').textContent = 'Offline';
+    $('headerStatus').textContent = t('unavailable');
     renderTabs();
   } finally { $('refreshBtn').disabled = false; }
 }

@@ -7,7 +7,7 @@ import { buildAttentionItems, buildIncidents, classifyOverview, classifyQueue, d
 import { runMountReadTest, updateMountState } from './lib/mount-check.js';
 import crypto from 'node:crypto';
 import { atomicWrite, defaults as defaultConfig, deepMerge, integrations, migrateConfig, migrateLegacyFiles, publicConfig, validateConfig, validateMountPath, applySecretUpdates, normalizeConfigInput } from './lib/config.js';
-import { cookieValue, hashPassword, sessionStore, verifyPassword } from './lib/auth.js';
+import { cookieValue, hashPassword, sessionStore, verifyPassword, requestIsSecure, sessionCookie, clearedSessionCookie } from './lib/auth.js';
 import { testIntegration } from './lib/integrations.js';
 import packageJson from './package.json' with { type: 'json' };
 
@@ -1004,8 +1004,8 @@ async function handler(req, res) {
   const authenticated=()=>sessions.valid(cookieValue(req.headers.cookie));
   const adminReady=()=>Boolean(config.admin?.passwordHash);
   if(url.pathname==='/api/auth/status'&&req.method==='GET')return sendJson(res,200,{authenticated:authenticated(),required:configured&&adminReady()});
-  if(url.pathname==='/api/auth/login'&&req.method==='POST'){if(!sameOrigin())return sendJson(res,403,{ok:false,code:'cross_origin'});const key=req.socket.remoteAddress||'unknown',attempt=failedLogins.get(key)||{count:0,until:0};if(attempt.until>Date.now())return sendJson(res,429,{ok:false,code:'rate_limited'});const body=await readJsonBody(req);if(!await verifyPassword(body?.password,config.admin?.passwordHash)){attempt.count++;attempt.until=attempt.count>=5?Date.now()+60000:0;failedLogins.set(key,attempt);return sendJson(res,401,{ok:false,code:'invalid_credentials'});}failedLogins.delete(key);const token=sessions.create();res.setHeader('set-cookie',`arrsight_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800`);return sendJson(res,200,{ok:true});}
-  if(url.pathname==='/api/auth/logout'&&req.method==='POST'){if(!sameOrigin())return sendJson(res,403,{ok:false,code:'cross_origin'});sessions.remove(cookieValue(req.headers.cookie));res.setHeader('set-cookie','arrsight_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');return sendJson(res,200,{ok:true});}
+  if(url.pathname==='/api/auth/login'&&req.method==='POST'){if(!sameOrigin())return sendJson(res,403,{ok:false,code:'cross_origin'});const key=req.socket.remoteAddress||'unknown',attempt=failedLogins.get(key)||{count:0,until:0};if(attempt.until>Date.now())return sendJson(res,429,{ok:false,code:'rate_limited'});const body=await readJsonBody(req);if(!await verifyPassword(body?.password,config.admin?.passwordHash)){attempt.count++;attempt.until=attempt.count>=5?Date.now()+60000:0;failedLogins.set(key,attempt);return sendJson(res,401,{ok:false,code:'invalid_credentials'});}failedLogins.delete(key);const token=sessions.create();res.setHeader('set-cookie',sessionCookie(token,{secure:requestIsSecure(req)}));return sendJson(res,200,{ok:true});}
+  if(url.pathname==='/api/auth/logout'&&req.method==='POST'){if(!sameOrigin())return sendJson(res,403,{ok:false,code:'cross_origin'});sessions.remove(cookieValue(req.headers.cookie));res.setHeader('set-cookie',clearedSessionCookie(requestIsSecure(req)));return sendJson(res,200,{ok:true});}
   if (url.pathname === '/api/health') return sendJson(res, 200, { status: configured?'ok':'setup_required', service:'ArrSight', version:packageJson.version });
   if (url.pathname === '/api/config' && req.method === 'GET') {if(configured&&adminReady()&&!authenticated())return sendJson(res,401,{configured:true,code:'authentication_required'});return sendJson(res,200,{configured,config:publicConfig(config)});}
   if (url.pathname === '/api/config' && req.method === 'PUT') {
@@ -1014,7 +1014,7 @@ async function handler(req, res) {
     if((!configured||!adminReady()) && (body.setupCode!==setupCode || Date.now()>setupCodeExpiresAt)) return sendJson(res,403,{ok:false,code:Date.now()>setupCodeExpiresAt?'setup_code_expired':'setup_code_invalid'});
     if(configured&&adminReady()&&!authenticated())return sendJson(res,401,{ok:false,code:'authentication_required'});
     const {setupCode:_setupCode,adminPassword:_adminPassword,configVersion:_configVersion,productName:_productName,port:_port,...configBody}=body;const normalized=normalizeConfigInput(configBody);if(normalized.errors.length)return sendJson(res,400,{ok:false,code:'validation_failed',errors:normalized.errors});const candidate=normalized.value;
-    const next=applySecretUpdates(migrateConfig(deepMerge(config,candidate)),config); const errors=validateConfig(next); if(errors.length) return sendJson(res,400,{ok:false,code:'validation_failed',errors});
+    const next=applySecretUpdates(migrateConfig(deepMerge(config,candidate)),config); if(candidate.links)next.links=candidate.links; const errors=validateConfig(next); if(errors.length) return sendJson(res,400,{ok:false,code:'validation_failed',errors});
     if(!adminReady()){try{next.admin={passwordHash:await hashPassword(body.adminPassword)};}catch{return sendJson(res,400,{ok:false,code:'invalid_admin_password'});}}
     await atomicWrite(configPath,next); config=next; configured=true; setupCode=null; setupCodeExpiresAt=0; lastSnapshot=null; lastSnapshotAt=0;
     return sendJson(res,200,{ok:true,config:publicConfig(config)});
@@ -1036,6 +1036,7 @@ async function handler(req, res) {
     const result = await runAction(body);
     return sendJson(res, result.status || (result.ok ? 200 : 400), result);
   }
+  if ((url.pathname === '/api/snapshot' || url.pathname === '/api/logs') && configured && adminReady() && !authenticated()) return sendJson(res, 401, { ok: false, code: 'authentication_required' });
   if (url.pathname === '/api/snapshot') {
     const snapshot = await buildSnapshot(url.searchParams.get('force') === '1');
     return sendJson(res, 200, snapshot);

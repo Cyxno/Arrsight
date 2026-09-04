@@ -81,6 +81,28 @@ test('HTML keeps light, dark and system theme choices and accessible panels', as
   assert.equal((html.match(/data-panel="/g) || []).length, 4);
 });
 
+test('header branding links to overview without reloading', async () => {
+  const html = await fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+  const css = await fs.readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
+  const link = html.match(/<a class="brand-link" href="#overview"[^>]*>/)?.[0] || '';
+  assert.ok(link, 'branding must be an anchor to #overview');
+  assert.match(link, /data-i18n-aria="backToOverview"/);
+  assert.match(html, /class="brand-link"[\s\S]{0,200}<img src="\/arrsight-mark\.svg" alt="">/);
+  assert.match(css, /\.brand-link \{ display:flex/);
+  assert.match(css, /\.brand-link:focus-visible/);
+});
+
+test('header status is dynamic and reflects real snapshot and localized failure', async () => {
+  const html = await fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+  const source = await fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const statusTag = html.match(/<span id="headerStatus"[^>]*>/)?.[0] || '';
+  assert.ok(statusTag && !statusTag.includes('data-i18n'), 'header status must not carry a static data-i18n key that translateDom overwrites');
+  assert.ok(source.includes("$('headerStatus').className = `badge ${safe(snapshot, 'overview.status', 'unknown')}`"));
+  assert.ok(source.includes("$('headerStatus').textContent = label(safe(snapshot, 'overview.status', 'unknown'))"));
+  assert.ok(source.includes("$('headerStatus').textContent = t('unavailable')"));
+  assert.ok(source.includes("location.href = '/setup'"));
+});
+
 test('client listens for hash changes without loading another snapshot', async () => {
   const source = await fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(source, /addEventListener\('hashchange', handleHashChange\)/);

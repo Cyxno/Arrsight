@@ -1,3 +1,17 @@
-import test from 'node:test';import assert from 'node:assert/strict';import{hashPassword,verifyPassword,sessionStore,cookieValue}from'../lib/auth.js';
+import test from 'node:test';import assert from 'node:assert/strict';import{hashPassword,verifyPassword,sessionStore,cookieValue,SESSION_TTL_MS,requestIsSecure,sessionCookie,clearedSessionCookie}from'../lib/auth.js';
 test('administrator passwords are strongly hashed',async()=>{const stored=await hashPassword('correct horse battery');assert.match(stored,/^scrypt:/);assert.equal(stored.includes('correct horse'),false);assert.equal(await verifyPassword('correct horse battery',stored),true);assert.equal(await verifyPassword('wrong password',stored),false);});
 test('sessions expire and cookies parse',()=>{const original=Date.now;let now=100;Date.now=()=>now;try{const store=sessionStore(10),token=store.create();assert.equal(store.valid(token),true);now=111;assert.equal(store.valid(token),false);assert.equal(cookieValue(`a=b; arrsight_session=${token}`),token);}finally{Date.now=original;}});
+test('secure detection trusts encrypted sockets and private proxy peers only',()=>{const req=(headers={},remoteAddress='127.0.0.1',encrypted=false)=>({headers,socket:{remoteAddress,encrypted}});
+assert.equal(requestIsSecure(req({},'127.0.0.1',true)),true);
+assert.equal(requestIsSecure(req({'x-forwarded-proto':'https'},'127.0.0.1')),true);
+assert.equal(requestIsSecure(req({'x-forwarded-proto':'https'},'::1')),true);
+assert.equal(requestIsSecure(req({'x-forwarded-proto':'https'},'::ffff:192.168.1.10')),true);
+assert.equal(requestIsSecure(req({'x-forwarded-proto':'https'},'::ffff:10.1.2.3')),true);
+assert.equal(requestIsSecure(req({'x-forwarded-proto':'https'},'172.16.0.9')),true);
+assert.equal(requestIsSecure(req({'x-forwarded-proto':'HTTPS, http'},'192.168.0.5')),true);
+assert.equal(requestIsSecure(req({'x-forwarded-proto':'https'},'::ffff:203.0.113.9')),false);
+assert.equal(requestIsSecure(req({'x-forwarded-proto':'https'},'172.32.0.1')),false);
+assert.equal(requestIsSecure(req({'x-forwarded-proto':'http'},'127.0.0.1')),false);
+assert.equal(requestIsSecure(req({},'127.0.0.1')),false);
+assert.equal(requestIsSecure(req({'x-forwarded-proto':'https'},'')),false);});
+test('session cookies carry Secure only when requested',()=>{assert.equal(sessionCookie('tok'),`arrsight_session=tok; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL_MS/1000}`);assert.equal(sessionCookie('tok',{secure:true}),`arrsight_session=tok; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL_MS/1000}; Secure`);assert.equal(clearedSessionCookie(false),'arrsight_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');assert.equal(clearedSessionCookie(true),'arrsight_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0; Secure');});

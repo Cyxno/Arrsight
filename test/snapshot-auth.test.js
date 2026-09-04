@@ -1,0 +1,13 @@
+import test from'node:test';import assert from'node:assert/strict';import{spawn}from'node:child_process';import fs from'node:fs/promises';import os from'node:os';import path from'node:path';
+test('snapshot and logs require an administrator session after setup',async()=>{const dir=await fs.mkdtemp(path.join(os.tmpdir(),'arrsight-snap-')),port=20500+Math.floor(Math.random()*200),origin=`http://127.0.0.1:${port}`;let child,output='';try{child=spawn(process.execPath,['server.js'],{cwd:new URL('..',import.meta.url),env:{...process.env,CONFIG_DIR:dir,PORT:String(port)},stdio:['ignore','pipe','pipe']});await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('startup timeout')),5000);child.stdout.on('data',data=>{output+=data;if(output.includes('listening')){clearTimeout(timer);resolve();}});});
+let response=await fetch(`${origin}/api/health`);assert.equal((await response.json()).status,'setup_required');
+response=await fetch(`${origin}/api/snapshot`);assert.equal(response.status,200);
+const code=output.match(/setup code .*: (\S+)/)?.[1];assert.ok(code);
+response=await fetch(`${origin}/api/config`,{method:'PUT',headers:{origin,'content-type':'application/json'},body:JSON.stringify({setupCode:code,adminPassword:'a secure password',locale:'en',managementMode:'monitoring'})});assert.equal(response.status,200);
+response=await fetch(`${origin}/api/snapshot`);assert.equal(response.status,401);assert.equal((await response.json()).code,'authentication_required');
+response=await fetch(`${origin}/api/snapshot`,{headers:{cookie:'arrsight_session=forged'}});assert.equal(response.status,401);
+response=await fetch(`${origin}/api/logs?type=verifier`);assert.equal(response.status,401);assert.equal((await response.json()).code,'authentication_required');
+response=await fetch(`${origin}/api/health`);assert.equal(response.status,200);
+response=await fetch(`${origin}/api/auth/login`,{method:'POST',headers:{origin,'content-type':'application/json'},body:JSON.stringify({password:'a secure password'})});const cookie=response.headers.get('set-cookie').split(';')[0];
+response=await fetch(`${origin}/api/snapshot`,{headers:{cookie}});assert.equal(response.status,200);const snapshot=await response.json();assert.ok(snapshot.generatedAt);assert.ok(snapshot.overview);
+response=await fetch(`${origin}/api/logs?type=verifier`,{headers:{cookie}});assert.equal(response.status,200);const logs=await response.json();assert.equal(logs.type,'verifier');assert.equal(Array.isArray(logs.lines),true);}finally{child?.kill('SIGTERM');await fs.rm(dir,{recursive:true,force:true});}});
