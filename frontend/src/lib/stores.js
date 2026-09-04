@@ -96,7 +96,7 @@ export function exportSnapshot() {
   if (!data || typeof document === 'undefined') return;
   const link = document.createElement('a');
   link.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
-  link.download = `arr-health-${Date.now()}.json`;
+  link.download = `arrsight-snapshot-${Date.now()}.json`;
   link.click();
   URL.revokeObjectURL(link.href);
 }

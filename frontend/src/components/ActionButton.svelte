@@ -17,7 +17,7 @@
     toast(t('actionRunning'));
     try {
       const result = await runAction(action, target || undefined);
-      toast(result.message || result.error || t(result.ok ? 'started' : 'failed'), result.ok ? 'ok' : 'err');
+      toast(result.ok ? t('started') : t(result.code || 'failed'), result.ok ? 'ok' : 'err');
     } catch (error) {
       toast(`${t('error')}: ${error.code || error.message}`, 'err');
     } finally {

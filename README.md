@@ -51,7 +51,7 @@ docker run -d \
 
 Only when Docker monitoring or management is enabled, add `-v /var/run/docker.sock:/var/run/docker.sock:ro`. The socket grants powerful control over Docker even with a read-only bind option. Monitoring-only mode is the safe default and permits no container or host actions.
 
-Open `http://HOST:8090`. On first launch ArrSight shows the guided setup wizard in the app and prints a one-time, 30-minute setup code to the container log (`docker logs arrsight`). Setup also creates an administrator password using Node.js `scrypt`; only its salted hash is stored. After setup, dashboard data (`/api/snapshot`, `/api/logs`) and settings require an expiring HttpOnly, SameSite session; `/api/health` stays open. When a reverse proxy terminates HTTPS, set the environment variable `ARRSIGHT_TRUST_PROXY=true` and ArrSight marks the session cookie `Secure` based on an `X-Forwarded-Proto: https` request header; without that variable the header is ignored, so direct local HTTP installations stay safe by default. Secrets use password fields, are stored with mode `0600`, and are never returned by configuration APIs.
+Open `http://HOST:8090`. On first launch ArrSight shows the guided setup wizard in the app and prints a one-time, 30-minute setup code to the container log (`docker logs arrsight`). Setup also creates an administrator password using Node.js `scrypt`; only its salted hash is stored. After setup, dashboard data (`/api/snapshot`, `/api/logs`) and settings require an expiring HttpOnly, SameSite session; `/api/health` stays open. When a reverse proxy terminates HTTPS, set the environment variable `ARRSIGHT_TRUST_PROXY=true` and ArrSight marks the session cookie `Secure` based on an `X-Forwarded-Proto: https` request header and uses `X-Forwarded-For` as the client key for login throttling; without that variable both headers are ignored, so direct local HTTP installations stay safe by default and clients cannot spoof either header. Secrets use password fields, are stored with mode `0600`, and are never returned by configuration APIs.
 
 `PUID`, `PGID`, and `UMASK` control the non-root runtime identity and created-file permissions. The entrypoint prepares only `/config`; it never recursively changes media/log mounts or changes Docker-socket permissions. When present, the socket group is added as a supplementary group. Unraid defaults are `PUID=99`, `PGID=100`, and `UMASK=0022`.
 
@@ -69,7 +69,7 @@ Back up `/config` before updates. Pull and recreate the container to update. Exi
 
 ## Unraid and GHCR
 
-Import `unraid/my-arr-health-dashboard.xml`, review the optional mounts, start the container, then retrieve the setup code from its log. Images on GHCR inherit the visibility of their package settings; if the package is private, Unraid needs credentials to pull — after the first publication, package visibility can be changed to public (Package settings → Danger Zone) so it can be pulled anonymously.
+Import `unraid/arrsight.xml`, review the optional mounts, start the container, then retrieve the setup code from its log. Images on GHCR inherit the visibility of their package settings; if the package is private, Unraid needs credentials to pull — after the first publication, package visibility can be changed to public (Package settings → Danger Zone) so it can be pulled anonymously.
 
 Images publish as `ghcr.io/cyxno/arrsight:latest`, semantic-version tags, and commit-SHA tags for AMD64 and ARM64 after syntax checks, the frontend build and tests pass. Pull requests validate and build without publishing.
 
@@ -79,7 +79,7 @@ Keep ArrSight behind a trusted network or authenticated reverse proxy. Setup and
 
 **Docker socket:** mounting `/var/run/docker.sock` grants powerful, effectively root-equivalent access to the host — even when bound read-only. ArrSight itself only issues container inspect calls and restarts for explicitly allowlisted containers (management modes only), but anyone who gains ArrSight admin access while the socket is mounted has that reach. Do not mount the socket unless you need container monitoring or management, and never expose the dashboard to the internet without an authenticated proxy in front of it. See [SECURITY.md](SECURITY.md) for reporting and deployment expectations.
 
-**Reverse proxy / HTTPS:** ArrSight speaks plain HTTP and has no TLS of its own. Terminate HTTPS on a trusted reverse proxy and set `ARRSIGHT_TRUST_PROXY=true` so session cookies are marked `Secure`; without that variable forwarded headers are ignored, keeping direct LAN installs safe by default.
+**Reverse proxy / HTTPS:** ArrSight speaks plain HTTP and has no TLS of its own. Terminate HTTPS on a trusted reverse proxy and set `ARRSIGHT_TRUST_PROXY=true` so session cookies are marked `Secure` and login throttling keys on `X-Forwarded-For`; without that variable forwarded headers are ignored, keeping direct LAN installs safe by default. Only enable it behind a proxy you control, since clients could otherwise spoof those headers.
 
 ## Troubleshooting
 

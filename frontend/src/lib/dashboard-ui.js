@@ -1,6 +1,16 @@
 // Pure dashboard logic, ported from the original public/dashboard-ui.js and
 // extended with the new navigation destinations. Framework-free so the node
 // test suite can exercise it directly.
+import { tf } from './i18n.js';
+
+// Server attention items carry structured types; title/advice text is a
+// neutral English fallback that gets localized here by type when a catalog
+// entry exists.
+const localizeAttention = (item) => ({
+  ...item,
+  title: tf(`attention.${item.type}.title`, item.title),
+  advice: tf(`attention.${item.type}.advice`, item.advice)
+});
 
 export const TABS = Object.freeze([
   { id: 'overview', hash: '#overview', labelKey: 'overview' },
@@ -32,7 +42,10 @@ function fallbackItems(snapshot = {}) {
   return [...new Map(items.map((item) => [item.key, item])).values()];
 }
 
-export function attentionItems(snapshot = {}) { return Array.isArray(snapshot.attentionItems) ? snapshot.attentionItems : fallbackItems(snapshot); }
+export function attentionItems(snapshot = {}) {
+  const items = Array.isArray(snapshot.attentionItems) ? snapshot.attentionItems : fallbackItems(snapshot);
+  return items.map(localizeAttention);
+}
 
 export function incidentTab(incident = {}) {
   if (/provider|usenet|missing-articles/i.test(`${incident.id || ''} ${incident.area || ''} ${incident.source || ''}`)) return 'providers';

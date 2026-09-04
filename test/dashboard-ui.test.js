@@ -73,11 +73,29 @@ test('global problem total deduplicates repeated incident fingerprints', () => {
 test('critical banner selects the newest critical incident and destination', () => {
   const snapshot = baseSnapshot();
   snapshot.incidents.active.push(
-    { id: 'provider-trip', title: 'Provider trip', severity: 'critical', source: 'Example', advice: 'Controleer provider', lastSeen: '2026-09-02T09:00:00Z' },
-    { id: 'mount-read-check', title: 'Mount offline', severity: 'critical', source: 'Read-test', advice: 'Controleer mount', lastSeen: '2026-09-02T10:00:00Z' }
+    { id: 'provider-trip', title: 'Provider trip', severity: 'critical', source: 'Example', advice: 'Watch provider timeouts.', lastSeen: '2026-09-02T09:00:00Z' },
+    { id: 'mount-read-check', title: 'Mount offline', severity: 'critical', source: 'Read-test', advice: 'Raw backend advice', lastSeen: '2026-09-02T10:00:00Z' }
   );
   const selected = selectCriticalBanner(snapshot);
-  assert.equal(selected.title, 'Mount offline'); assert.equal(selected.source, 'Read-test'); assert.equal(selected.advice, 'Controleer mount'); assert.equal(selected.tab, 'system'); assert.equal(selected.detail, 'mount');
+  assert.equal(selected.title, 'Mount offline'); assert.equal(selected.source, 'Read-test');
+  assert.equal(selected.advice, 'Check the download-client mount, then run the mount check.', 'known attention types localize advice');
+  assert.equal(selected.tab, 'system'); assert.equal(selected.detail, 'mount');
+});
+
+test('attention titles and advice localize by type with server text as fallback', async () => {
+  const { setLocale } = await import('../frontend/src/lib/i18n.js');
+  const snapshot = { attentionItems: [{ key: 'x', type: 'import-stuck', severity: 'critical', tab: 'downloads', title: 'Backend title fallback', advice: 'Backend advice fallback', source: 'logs', detail: 'queues', firstSeen: '2026-09-02T09:00:00Z', lastSeen: '2026-09-02T10:00:00Z' }], incidents: { active: [] }, queues: {}, containers: [] };
+  const unknown = { attentionItems: [{ key: 'y', type: 'future-type', severity: 'warning', tab: 'overview', title: 'Unknown title', advice: 'Unknown advice', source: 'x', detail: 'incidents', lastSeen: '2026-09-02T10:00:00Z' }], incidents: { active: [] }, queues: {}, containers: [] };
+  try {
+    setLocale('en', false);
+    assert.equal(selectPrimaryAttention(snapshot).title, 'Import stuck');
+    assert.equal(selectPrimaryAttention(snapshot).advice, 'Completed/importPending or sample detection is stuck. Periodic cleanup should remove it and search again.');
+    assert.equal(selectPrimaryAttention(unknown).title, 'Unknown title', 'uncatalogued types keep server text');
+    setLocale('nl', false);
+    assert.equal(selectPrimaryAttention(snapshot).title, 'Import blijft hangen');
+    assert.equal(selectPrimaryAttention(snapshot).advice, 'Completed/importPending of sample-detectie loopt vast. Periodieke schoonmaak hoort dit te verwijderen en opnieuw te zoeken.');
+    assert.equal(selectPrimaryAttention(unknown).advice, 'Unknown advice');
+  } finally { setLocale('en', false); }
 });
 
 test('server attention list is the single source for badges banner and recommendation', () => {

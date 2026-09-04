@@ -27,7 +27,21 @@ Only the latest release receives security fixes.
   code printed to the container log. Keep container logs private.
 - **HTTPS:** when a reverse proxy terminates TLS, set
   `ARRSIGHT_TRUST_PROXY=true` so session cookies are marked `Secure`.
-  Without it, `X-Forwarded-Proto` is ignored.
+  Without it, `X-Forwarded-Proto` is ignored. When enabled, ArrSight also
+  trusts `X-Forwarded-For` for login throttling — only enable it behind a
+  proxy you control.
+- **Integration URLs (intentional server-side requests):** ArrSight performs
+  server-side requests to the integration URLs the administrator configures
+  (for example `http://sonarr:8989`, `http://radarr:7878`,
+  `http://jellyfin:8096`, or LAN addresses such as `http://192.168.x.x:port`).
+  This is by design: these targets are expected to be trusted services in
+  your own Docker network or LAN. ArrSight deliberately does **not** block
+  private IP ranges, localhost, or Docker DNS names. The boundaries are:
+  only HTTP/HTTPS URLs are accepted, embedded credentials
+  (`http://user:pass@host/`) and malformed URLs are rejected, and once setup
+  is complete only an authenticated administrator (or the setup code during
+  the initial setup window) can configure or test integration URLs. There is
+  no unauthenticated endpoint that makes ArrSight fetch an arbitrary URL.
 - **Usenet provider names** may be referenced in log-derived incident text;
   self-hosters configure their own integrations, so review your public
   screenshots and configuration before sharing them.

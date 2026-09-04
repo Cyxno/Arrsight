@@ -62,7 +62,43 @@ export const en = {
   recentProblems: 'Recent problems', uniqueProblems: 'Unique problems', noData: 'No data yet.', pipelineHelp: 'Click a stage for details.',
   restarts: 'Restarts', restartIncreased: 'Restarted unexpectedly', skipped: 'Skipped runs', backoffs: 'Blocklist backoffs',
   searchEvents: 'Search events', verifierRuns: 'Verifier runs', repairsPerformed: '{count} repairs', streamChecks: '{count} stream checks',
-  step: 'Step', of: 'of', openDashboard: 'Open dashboard', setupSaved: 'Setup complete. Sign in with your new administrator password.'
+  step: 'Step', of: 'of', openDashboard: 'Open dashboard', setupSaved: 'Setup complete. Sign in with your new administrator password.',
+  management_disabled: 'Management actions are disabled in monitoring-only mode.',
+  action_in_progress: 'Another management action is still running.',
+  invalid_action: 'Unknown or invalid action.',
+  container_not_allowed: 'This container is not in the configured allowlist.',
+  full_management_required: 'Full management mode is required for this action.',
+  resolvedAdvice: 'The problem is no longer active.',
+  'chain.arr': 'Sonarr / Radarr', 'chain.provider': 'Usenet providers', 'chain.infinidysk': 'Download client', 'chain.mount': 'WebDAV mount', 'chain.library': 'Import / library', 'chain.bazarr': 'Bazarr', 'chain.plex': 'Plex container',
+  'attention.provider-trip.title': 'Provider trip / timeout',
+  'attention.provider-trip.advice': 'Watch provider timeouts and trips. If these accumulate, lower the connection count or temporarily disable the provider.',
+  'attention.single-provider.title': 'Only one provider used',
+  'attention.single-provider.advice': 'The fallback is not being used or is ineligible. Check provider settings if missing articles keep increasing.',
+  'attention.missing-articles.title': 'Missing articles / DMCA',
+  'attention.missing-articles.advice': 'This is normal after takedowns. Investigate if the same title recurs or no 1080p fallback is selected.',
+  'attention.repair-action.title': 'Repair / blocklist action',
+  'attention.repair-action.advice': 'This is usually expected: the broken release is removed or blocklisted and searched again.',
+  'attention.import-stuck.title': 'Import stuck',
+  'attention.import-stuck.advice': 'Completed/importPending or sample detection is stuck. Periodic cleanup should remove it and search again.',
+  'attention.fallback-rescue.title': 'Recent missing rescue',
+  'attention.fallback-rescue.advice': 'The fallback rescue steps in for recent missing episodes and picks a lower or alternative release.',
+  'attention.search-limit.title': 'Replacement limit reached',
+  'attention.search-limit.advice': 'Too many broken releases were attempted. Check whether acceptable 720p/1080p releases remain available.',
+  'attention.mount-watchdog.title': 'Mount/watchdog recovery',
+  'attention.mount-watchdog.advice': 'The mount was stale or missing, or containers could not see it. Tighten rclone or watchdog checks if this recurs.',
+  'attention.corrupt-media.title': 'Corrupt or unreadable media',
+  'attention.corrupt-media.advice': 'The file is not reliably playable. The repair or verifier job should remove it and search again.',
+  'attention.queue-busy.title': 'Queue/backlog busy',
+  'attention.queue-busy.advice': 'Scripts pause heavier checks while the download client is busy. Expected behavior, but prolonged busyness deserves attention.',
+  'attention.queue-failed.advice': 'Open the queue details and repair or remove the failed item.',
+  'attention.queue-stalled.advice': 'Check progress and import status.',
+  'attention.container-state.advice': 'Check container status and logs; restart only when safe.',
+  'attention.container-restart.advice': 'Check container logs around the restart time.',
+  'attention.docker-unreachable.advice': 'Check the Docker socket and dashboard permissions.',
+  'attention.api-unreachable.advice': 'Check the container, network, and API configuration.',
+  'attention.mount-read-check.advice': 'Check the download-client mount, then run the mount check.',
+  'attention.verifier-failed.advice': 'Check the verifier log and fix the cause before starting another run.',
+  'attention.verifier-incomplete.advice': 'Check why the earlier verifier run did not finish cleanly.'
 };
 export const nl = {
   language: 'Taal', theme: 'Kleurthema', system: 'Systeem', light: 'Licht', dark: 'Donker',
@@ -126,7 +162,43 @@ export const nl = {
   recentProblems: 'Recente problemen', uniqueProblems: 'Unieke problemen', noData: 'Nog geen gegevens.', pipelineHelp: 'Klik op een schakel voor details.',
   restarts: 'Herstarts', restartIncreased: 'Onverwacht herstart', skipped: 'Overgeslagen runs', backoffs: 'Blocklist-terugdringingen',
   searchEvents: 'Zoekgebeurtenissen', verifierRuns: 'Verifier-runs', repairsPerformed: '{count} herstelacties', streamChecks: '{count} streamcontroles',
-  step: 'Stap', of: 'van', openDashboard: 'Dashboard openen', setupSaved: 'Installatie voltooid. Meld aan met uw nieuwe beheerderswachtwoord.'
+  step: 'Stap', of: 'van', openDashboard: 'Dashboard openen', setupSaved: 'Installatie voltooid. Meld aan met uw nieuwe beheerderswachtwoord.',
+  management_disabled: 'Beheeracties zijn uitgeschakeld in de bewakingsmodus.',
+  action_in_progress: 'Er draait nog een andere beheeractie.',
+  invalid_action: 'Onbekende of ongeldige actie.',
+  container_not_allowed: 'Deze container staat niet in de geconfigureerde toestaande lijst.',
+  full_management_required: 'Voor deze actie is de volledige beheermodus vereist.',
+  resolvedAdvice: 'Het probleem is niet meer actief.',
+  'chain.arr': 'Sonarr / Radarr', 'chain.provider': 'Usenet-providers', 'chain.infinidysk': 'Downloadclient', 'chain.mount': 'WebDAV-koppeling', 'chain.library': 'Import / bibliotheek', 'chain.bazarr': 'Bazarr', 'chain.plex': 'Plex-container',
+  'attention.provider-trip.title': 'Providerstoring / time-out',
+  'attention.provider-trip.advice': 'Houd provider-time-outs en storingen in de gaten. Als deze oplopen: verlaag het aantal verbindingen of schakel de provider tijdelijk uit.',
+  'attention.single-provider.title': 'Maar één provider in gebruik',
+  'attention.single-provider.advice': 'De fallback wordt niet gebruikt of is niet geschikt. Controleer de providerinstellingen als ontbrekende artikelen blijven oplopen.',
+  'attention.missing-articles.title': 'Ontbrekende artikelen / DMCA',
+  'attention.missing-articles.advice': 'Dit is normaal na takedowns. Onderzoek het als dezelfde titel terugkeert of geen 1080p-fallback wordt gekozen.',
+  'attention.repair-action.title': 'Herstel- / blocklistactie',
+  'attention.repair-action.advice': 'Dit is meestal verwacht: de kapotte release wordt verwijderd of geblacklist en opnieuw gezocht.',
+  'attention.import-stuck.title': 'Import blijft hangen',
+  'attention.import-stuck.advice': 'Completed/importPending of sample-detectie loopt vast. Periodieke schoonmaak hoort dit te verwijderen en opnieuw te zoeken.',
+  'attention.fallback-rescue.title': 'Rescue voor recente ontbrekende afleveringen',
+  'attention.fallback-rescue.advice': 'De fallback-rescue grijpt in voor recente ontbrekende afleveringen en kiest een lagere of andere release.',
+  'attention.search-limit.title': 'Vervangingslimiet bereikt',
+  'attention.search-limit.advice': 'Er zijn te veel kapotte releases geprobeerd. Controleer of er nog acceptabele 720p/1080p-releases beschikbaar zijn.',
+  'attention.mount-watchdog.title': 'Mount-/watchdog-herstel',
+  'attention.mount-watchdog.advice': 'De koppeling was verouderd of afwezig, of containers konden hem niet zien. Verstevig rclone- of watchdogcontroles als dit vaker gebeurt.',
+  'attention.corrupt-media.title': 'Corrupte of onleesbare media',
+  'attention.corrupt-media.advice': 'Het bestand is niet betrouwbaar afspeelbaar. De herstel- of verifiertaak hoort het te verwijderen en opnieuw te zoeken.',
+  'attention.queue-busy.title': 'Wachtrij/achterstand druk',
+  'attention.queue-busy.advice': 'Scripts pauzeren zwaardere checks terwijl de downloadclient druk is. Normaal gedrag, maar langdurige drukte is verdacht.',
+  'attention.queue-failed.advice': 'Open de wachtrijdetails en herstel of verwijder het mislukte item.',
+  'attention.queue-stalled.advice': 'Controleer de voortgang en de importstatus.',
+  'attention.container-state.advice': 'Controleer de containerstatus en logs; herstart alleen als dat veilig is.',
+  'attention.container-restart.advice': 'Controleer de containerlogs rond het herstartmoment.',
+  'attention.docker-unreachable.advice': 'Controleer de Docker-socket en de rechten van het dashboard.',
+  'attention.api-unreachable.advice': 'Controleer de container, het netwerk en de API-configuratie.',
+  'attention.mount-read-check.advice': 'Controleer de koppeling van de downloadclient en voer daarna de koppelingscontrole uit.',
+  'attention.verifier-failed.advice': 'Controleer het verifierlog en los de oorzaak op voordat u een nieuwe run start.',
+  'attention.verifier-incomplete.advice': 'Controleer waarom de eerdere verifier-run niet correct is afgerond.'
 };
 export const dictionaries = { en, nl };
 
@@ -169,7 +241,13 @@ export function getLocale() { return current; }
 export function localeCode() { return current === 'nl' ? 'nl-NL' : 'en-GB'; }
 
 export function t(key, vars = {}) {
-  let text = dictionaries[current]?.[key] ?? en[key] ?? key;
+  let text = tf(key, key);
   for (const [name, value] of Object.entries(vars)) text = text.replaceAll(`{${name}}`, String(value));
   return text;
+}
+
+// Translate with an explicit fallback (used for server-provided text that is
+// already readable but has no catalog entry).
+export function tf(key, fallback) {
+  return dictionaries[current]?.[key] ?? en[key] ?? fallback;
 }

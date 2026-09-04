@@ -1,6 +1,6 @@
 <script>
   import StatusBadge from './StatusBadge.svelte';
-  import { t } from '../lib/i18n.js';
+  import { t, tf } from '../lib/i18n.js';
   import { number, when } from '../lib/format.js';
   import { openDrawer } from '../lib/stores.js';
 
@@ -23,10 +23,10 @@
 {#if chain.length}
   <div class="pipeline" role="list">
     {#each chain as node, index (node.id)}
-      <button type="button" role="listitem" class="node {node.status || 'unknown'}" on:click={() => openDrawer('node', node, node.label)}>
+      <button type="button" role="listitem" class="node {node.status || 'unknown'}" on:click={() => openDrawer('node', node, tf(`chain.${node.id}`, node.label))}>
         <span class="dot" aria-hidden="true"></span>
         <span class="copy">
-          <strong>{node.label}</strong>
+          <strong>{tf(`chain.${node.id}`, node.label)}</strong>
           <small>{queueSnapshotRows(node)}</small>
         </span>
         <StatusBadge status={node.status || 'unknown'} compact />

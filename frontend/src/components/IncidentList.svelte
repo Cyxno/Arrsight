@@ -1,6 +1,6 @@
 <script>
   import { fade, fly } from 'svelte/transition';
-  import { t } from '../lib/i18n.js';
+  import { t, tf } from '../lib/i18n.js';
   import { number, relTime } from '../lib/format.js';
 
   export let incidents = [];
@@ -20,7 +20,7 @@
       <li class="incident {severityClass(item)}" in:fly={{ y: 6, duration: 140 }} out:fade={{ duration: 80 }}>
         <span class="marker" aria-hidden="true"></span>
         <div class="copy">
-          <strong>{item.title}</strong>
+          <strong>{tf(`attention.${item.id}.title`, item.title)}</strong>
           <p class="meta">
             <span class="source">{item.source || t('unknownSource')}</span>
             {#if item.area}<span>· {item.area}</span>{/if}
@@ -28,7 +28,7 @@
             <span>· {t('lastSeen')} {relTime(item.lastSeen)}</span>
             {#if item.count > 1}<span class="count">{t('occurrences', { count: number(item.count) })}</span>{/if}
           </p>
-          {#if item.advice}<p class="advice">{item.advice}</p>{/if}
+          {#if item.advice}<p class="advice">{tf(`attention.${item.id}.advice`, item.advice)}</p>{/if}
         </div>
         <span class="when">{item.active ? t('active') : t('resolved')}</span>
       </li>
