@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>ArrSight</Name><Repository>ghcr.io/cyxno/arrsight:latest</Repository><Registry>https://ghcr.io/cyxno/arrsight</Registry><Network>bridge</Network><Shell>sh</Shell><Privileged>false</Privileged>
-  <Overview>ArrSight — Media stack health, at a glance. Optional monitoring for Sonarr, Radarr, Bazarr, Plex, Jellyfin, InfiniDysk, NZBDav, Docker, mounts, and logs.</Overview><Category>MediaApp:Video Status:Stable</Category><WebUI>http://[IP]:[PORT:8090]/</WebUI><Icon>https://raw.githubusercontent.com/Cyxno/arr-health-dashboard/main/public/arrsight-icon-256.png</Icon>
+  <Overview>ArrSight — Media stack health, at a glance. Optional monitoring for Sonarr, Radarr, Bazarr, Plex, Jellyfin, InfiniDysk, NZBDav, Docker, mounts, and logs.</Overview><Category>MediaApp:Video Status:Stable</Category><WebUI>http://[IP]:[PORT:8090]/</WebUI><Icon>http://[IP]:[PORT:8090]/icon.png</Icon>
   <Config Name="Web UI" Target="8090" Default="8090" Mode="tcp" Description="ArrSight web port." Type="Port" Display="always" Required="true" Mask="false">8090</Config>
   <Config Name="Configuration" Target="/config" Default="/mnt/user/appdata/arrsight" Mode="rw" Description="Configuration and operational history." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/arrsight</Config>
   <Config Name="Application logs" Target="/data" Default="/mnt/user/appdata" Mode="ro" Description="Optional read-only service and verifier logs." Type="Path" Display="always" Required="false" Mask="false">/mnt/user/appdata</Config>

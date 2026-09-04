@@ -1,6 +1,6 @@
 <div align="center"><img src="public/arrsight-logo.svg" width="320" alt="ArrSight"><p><strong>Media stack health, at a glance.</strong></p></div>
 
-ArrSight is a private, dependency-light operations dashboard for a self-hosted media stack. It combines live service checks, Docker state, read-only mount tests, and operational logs into one calm, dark-first interface: a sidebar app shell, an interactive media pipeline, click-through detail drawers, a multi-source log viewer, and an incidents workflow. The responsive interface supports English and Dutch, light and dark themes, keyboard navigation, and translated accessibility labels.
+ArrSight is a self-hosted monitoring and operations dashboard for the *Arr media stack, Usenet, InfiniDysk/NZBDav, Plex/Jellyfin and Docker. It combines live service checks, Docker state, read-only mount tests, and operational logs into one calm, dark-first interface: a sidebar app shell, an interactive media pipeline, click-through detail drawers, a multi-source log viewer, and an incidents workflow. The responsive interface supports English and Dutch, light and dark themes, keyboard navigation, and translated accessibility labels.
 
 ![ArrSight dashboard — dark](docs/dashboard-dark.png)
 
@@ -69,13 +69,29 @@ Back up `/config` before updates. Pull and recreate the container to update. Exi
 
 ## Unraid and GHCR
 
-Import `unraid/my-arr-health-dashboard.xml`, review the optional mounts, start the container, then retrieve the setup code from its log. GHCR packages from a private repository require authentication; after the first publication, package visibility may need to be changed to public manually before Unraid can pull anonymously.
+Import `unraid/my-arr-health-dashboard.xml`, review the optional mounts, start the container, then retrieve the setup code from its log. Images on GHCR inherit the visibility of their package settings; if the package is private, Unraid needs credentials to pull — after the first publication, package visibility can be changed to public (Package settings → Danger Zone) so it can be pulled anonymously.
 
 Images publish as `ghcr.io/cyxno/arrsight:latest`, semantic-version tags, and commit-SHA tags for AMD64 and ARM64 after syntax checks, the frontend build and tests pass. Pull requests validate and build without publishing.
 
 ## Security and privacy
 
 Keep ArrSight behind a trusted network or authenticated reverse proxy. Setup and settings writes enforce same-origin requests, allowlisted fields, URL/schema validation, normalized mount categories, atomic writes, secret redaction, and predefined actions. ArrSight has no CDN, analytics, external font, or telemetry. Snapshots and histories do not persist API keys, media titles, or log contents.
+
+**Docker socket:** mounting `/var/run/docker.sock` grants powerful, effectively root-equivalent access to the host — even when bound read-only. ArrSight itself only issues container inspect calls and restarts for explicitly allowlisted containers (management modes only), but anyone who gains ArrSight admin access while the socket is mounted has that reach. Do not mount the socket unless you need container monitoring or management, and never expose the dashboard to the internet without an authenticated proxy in front of it. See [SECURITY.md](SECURITY.md) for reporting and deployment expectations.
+
+**Reverse proxy / HTTPS:** ArrSight speaks plain HTTP and has no TLS of its own. Terminate HTTPS on a trusted reverse proxy and set `ARRSIGHT_TRUST_PROXY=true` so session cookies are marked `Secure`; without that variable forwarded headers are ignored, keeping direct LAN installs safe by default.
+
+## Troubleshooting
+
+- **First-run setup code** — printed to the container log for 30 minutes: `docker logs arrsight`. It disappears once setup completes; restart the container to get a new one if it expires.
+- **401 after setup** — expected: the dashboard requires the administrator login once configured.
+- **Mount checks failing** — verify the host folders are actually mounted into the container at `/media/tv`, `/media/movies` and `/nzbdav`, and that the files are readable by the container user (`PUID`/`PGID`).
+- **Cookie loops behind a proxy** — set `ARRSIGHT_TRUST_PROXY=true` on the container and make sure the proxy forwards `X-Forwarded-Proto`.
+- **No container data** — Docker monitoring needs the socket mounted and containers listed in Settings → Monitored containers.
+
+## License
+
+[MIT](LICENSE)
 
 ## Development
 

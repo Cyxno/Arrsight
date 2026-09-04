@@ -1,6 +1,8 @@
 {
   "name": "arrsight",
-  "version": "1.2.0",
+  "description": "Self-hosted monitoring and operations dashboard for the *Arr media stack, Usenet, InfiniDysk/NZBDav, Plex/Jellyfin and Docker.",
+  "license": "MIT",
+  "version": "1.2.1",
   "private": true,
   "type": "module",
   "scripts": {

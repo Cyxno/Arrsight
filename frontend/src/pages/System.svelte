@@ -6,7 +6,9 @@
   import { config, snapshot, openDrawer, exportSnapshot } from '../lib/stores.js';
 
   $: s = $snapshot;
-  $: managementEnabled = s && $config && $config.managementMode !== 'monitoring';
+  $: managementMode = $config?.managementMode || 'monitoring';
+  $: managementEnabled = managementMode !== 'monitoring';
+  $: fullManagement = managementMode === 'full';
   $: healthRows = ['sonarr', 'radarr'].map((key) => {
     const health = s?.health?.[key] || {};
     return {
@@ -101,12 +103,18 @@
         <StatusBadge status={managementEnabled ? 'active' : 'disabled'} label={managementEnabled ? t('active') : t('monitoringOnly')} compact />
       </div>
       <div class="actions">
-        <ActionButton label={t('runVerifier')} action="run-verifier" />
-        <ActionButton label={t('runPeriodic')} action="run-periodic" />
-        <ActionButton label={t('runMountCheck')} action="run-watchdog" confirmText={t('confirmManagement')} />
-        {#each s.containers || [] as container (container.name)}
-          <ActionButton label={t('restart', { name: container.name })} action="restart-container" target={container.name} kind="danger" confirmText={t('confirmManagement')} />
-        {/each}
+        {#if !managementEnabled}
+          <p class="muted">{t('monitoringOnly')} — {t('actions')} {t('disabled').toLowerCase()}</p>
+        {:else}
+          {#if fullManagement}
+            <ActionButton label={t('runVerifier')} action="run-verifier" />
+            <ActionButton label={t('runPeriodic')} action="run-periodic" />
+            <ActionButton label={t('runMountCheck')} action="run-watchdog" confirmText={t('confirmManagement')} />
+          {/if}
+          {#each s.containers || [] as container (container.name)}
+            <ActionButton label={t('restart', { name: container.name })} action="restart-container" target={container.name} kind="danger" confirmText={t('confirmManagement')} />
+          {/each}
+        {/if}
       </div>
     </section>
   </div>

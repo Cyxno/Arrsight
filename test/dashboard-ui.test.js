@@ -46,7 +46,7 @@ test('failed and stalled downloads create a downloads badge with the strongest s
 
 test('an active provider trip creates a providers badge', () => {
   const snapshot = baseSnapshot();
-  snapshot.incidents.active.push({ id: 'provider-trip', fingerprint: 'trip-1', severity: 'critical', source: 'Sunny' });
+  snapshot.incidents.active.push({ id: 'provider-trip', fingerprint: 'trip-1', severity: 'critical', source: 'Example' });
   assert.deepEqual(calculateTabBadges(snapshot).providers, { count: 1, severity: 'critical' });
 });
 
@@ -65,7 +65,7 @@ test('a stopped media container creates a media badge', () => {
 
 test('global problem total deduplicates repeated incident fingerprints', () => {
   const snapshot = baseSnapshot();
-  const incident = { id: 'provider-trip', fingerprint: 'same-problem', severity: 'warning', source: 'Viper' };
+  const incident = { id: 'provider-trip', fingerprint: 'same-problem', severity: 'warning', source: 'Example' };
   snapshot.incidents.active.push(incident, { ...incident, title: 'Repeated elsewhere' });
   assert.equal(calculateTabBadges(snapshot).overview.count, 1);
 });
@@ -73,7 +73,7 @@ test('global problem total deduplicates repeated incident fingerprints', () => {
 test('critical banner selects the newest critical incident and destination', () => {
   const snapshot = baseSnapshot();
   snapshot.incidents.active.push(
-    { id: 'provider-trip', title: 'Provider trip', severity: 'critical', source: 'Sunny', advice: 'Controleer provider', lastSeen: '2026-09-02T09:00:00Z' },
+    { id: 'provider-trip', title: 'Provider trip', severity: 'critical', source: 'Example', advice: 'Controleer provider', lastSeen: '2026-09-02T09:00:00Z' },
     { id: 'mount-read-check', title: 'Mount offline', severity: 'critical', source: 'Read-test', advice: 'Controleer mount', lastSeen: '2026-09-02T10:00:00Z' }
   );
   const selected = selectCriticalBanner(snapshot);

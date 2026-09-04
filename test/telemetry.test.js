@@ -16,7 +16,7 @@ test('old importPending queue becomes stalled and eventually critical', () => {
 test('old log error is historical while recent provider trip is active', () => {
   const now = new Date('2026-09-02T10:00:00Z');
   const incidents = buildIncidents([
-    { id: 'provider-trip', source: 'fixture', subject: 'Sunny', severity: 'critical', line: '2026-09-02T09:30:00Z Provider Sunny tripped' },
+    { id: 'provider-trip', source: 'fixture', subject: 'Example', severity: 'critical', line: '2026-09-02T09:30:00Z Provider Example tripped' },
     { id: 'import-stuck', source: 'fixture', subject: 'import', severity: 'critical', line: '2026-09-01T01:00:00Z Failed to import', advice: 'Inspecteer import' }
   ], now);
   assert.equal(incidents.find((i) => i.id === 'provider-trip').active, true);
@@ -69,24 +69,24 @@ test('failed queue unhealthy container API and mount share one exact attention c
 test('provider detection is dynamic and expired trips recover', () => {
   const now = new Date('2026-09-02T10:00:00Z');
   const events = [
-    { id:'provider-trip', subject:'Viper', line:'2026-09-02T09:30:00Z Provider "Viper" tripped' },
+    { id:'provider-trip', subject:'Example', line:'2026-09-02T09:30:00Z Provider "Example" tripped' },
     { id:'provider-trip', subject:'news.third.example', line:'2026-09-02T09:40:00Z Provider news.third.example tripped' }
   ];
   const active = buildIncidents(events, now);
   const providers = deriveProviders(events, active, now);
-  assert.equal(providers.find((item) => item.name === 'Viper').status, 'degraded');
+  assert.equal(providers.find((item) => item.name === 'Example').status, 'degraded');
   assert.ok(providers.some((item) => item.name === 'news.third.example'));
   const later = new Date('2026-09-02T12:00:00Z');
-  assert.equal(deriveProviders(events, buildIncidents(events, later), later).find((item) => item.name === 'Viper').status, 'healthy');
+  assert.equal(deriveProviders(events, buildIncidents(events, later), later).find((item) => item.name === 'Example').status, 'healthy');
 });
 
 test('historical missing articles do not create current provider outage', () => {
-  const now = new Date('2026-09-02T10:00:00Z'); const events = [{ id:'missing-articles', subject:'Viper', line:'2026-09-02T01:00:00Z news.vipernews.com missing articles' }];
+  const now = new Date('2026-09-02T10:00:00Z'); const events = [{ id:'missing-articles', subject:'news.example.com', line:'2026-09-02T01:00:00Z Provider news.example.com missing articles' }];
   assert.equal(deriveProviders(events, buildIncidents(events, now), now)[0].status, 'healthy');
 });
 
 test('repeated connection limit is an active provider incident', () => {
-  const now = new Date('2026-09-02T10:00:00Z'); const events = [{ id:'provider-connection', subject:'Viper', line:'2026-09-02T09:50:00Z Last error from "Viper": connection limit' }];
+  const now = new Date('2026-09-02T10:00:00Z'); const events = [{ id:'provider-connection', subject:'Example', line:'2026-09-02T09:50:00Z Last error from "Example": connection limit' }];
   assert.equal(deriveProviders(events, buildIncidents(events, now), now)[0].status, 'incident');
 });
 test('disabled optional monitoring does not make overall health unknown', () => {

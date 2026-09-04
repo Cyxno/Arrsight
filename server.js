@@ -7,12 +7,13 @@ import { buildAttentionItems, buildIncidents, classifyOverview, classifyQueue, d
 import { runMountReadTest, updateMountState } from './lib/mount-check.js';
 import crypto from 'node:crypto';
 import { atomicWrite, defaults as defaultConfig, deepMerge, integrations, migrateConfig, migrateLegacyFiles, publicConfig, validateConfig, validateMountPath, applySecretUpdates, normalizeConfigInput } from './lib/config.js';
-import { cookieValue, hashPassword, sessionStore, verifyPassword, requestIsSecure, sessionCookie, clearedSessionCookie } from './lib/auth.js';
+import { cookieValue, hashPassword, sessionStore, verifyPassword, requestIsSecure, sessionCookie, clearedSessionCookie, timingSafeEqualString } from './lib/auth.js';
 import { testIntegration } from './lib/integrations.js';
 import packageJson from './package.json' with { type: 'json' };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
+const frontendDistDir = path.join(__dirname, 'frontend', 'dist');
 const configDir = path.resolve(process.env.CONFIG_DIR || (__dirname === '/app' ? '/config' : __dirname));
 const configPath = path.join(configDir, 'config.json');
 const usageHistoryPath = path.join(configDir, 'usage-history.json');
@@ -67,15 +68,23 @@ function sendJson(res, status, body) {
   const json = JSON.stringify(body);
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
-    'cache-control': 'no-store'
+    'cache-control': 'no-store',
+    ...securityHeaders
   });
   res.end(json);
 }
 
 function sendText(res, status, body, type = 'text/plain; charset=utf-8') {
-  res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' });
+  res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store', ...securityHeaders });
   res.end(body);
 }
+
+const securityHeaders = {
+  'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY',
+  'referrer-policy': 'no-referrer',
+  'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+};
 
 async function fetchJson(url, options = {}) {
   const controller = new AbortController();
@@ -152,8 +161,10 @@ async function readUsageHistory() {
 
 async function writeUsageHistory(history) {
   usageWriteQueue = usageWriteQueue.then(async () => {
-    await fs.writeFile(usageHistoryPath, JSON.stringify(history, null, 2) + '\n', { mode: 0o600 });
-  }).catch(() => {});
+    const temporary = `${usageHistoryPath}.${process.pid}.tmp`;
+    await fs.writeFile(temporary, JSON.stringify(history, null, 2) + '\n', { mode: 0o600 });
+    await fs.rename(temporary, usageHistoryPath);
+  }).catch((error) => console.error('Usage history write failed:', error.message));
   return usageWriteQueue;
 }
 
@@ -357,6 +368,15 @@ async function readJsonBody(req) {
   });
 }
 
+async function readJsonOr400(req, res) {
+  try {
+    return await readJsonBody(req);
+  } catch {
+    sendJson(res, 400, { ok: false, code: 'invalid_json' });
+    return null;
+  }
+}
+
 function recentLines(text, count = 200) {
   return text.split(/\r?\n/).filter(Boolean).slice(-count);
 }
@@ -514,7 +534,7 @@ function parseAttentionEvents(sources) {
       title: 'Provider trip / timeout',
       severity: 'critical',
       area: 'Usenet providers',
-      advice: 'Let op Viper/Sunny timeouts of trips. Als dit oploopt: Viper lager zetten of tijdelijk uit.',
+      advice: 'Let op provider-time-outs en trips. Als dit oploopt: verbindingen lager zetten of de provider tijdelijk uitschakelen.',
       test: /Provider .*tripped|connection limit|read-timeout|TimeoutException|TooManyRequests|DownloadLimitExceeded/i
     },
     {
@@ -978,26 +998,29 @@ async function buildSnapshot(force = false) {
 async function serveStatic(req, res) {
   const url = new URL(req.url, 'http://localhost');
   const requested = url.pathname === '/' || url.pathname === '/setup' ? '/index.html' : url.pathname;
-  let filePath = path.normalize(path.join(publicDir, requested));
-  if (!filePath.startsWith(publicDir)) return sendText(res, 403, 'Forbidden');
-  try {
-    const data = await fs.readFile(filePath);
-    const ext = path.extname(filePath).toLowerCase();
-    const type = {
-      '.html': 'text/html; charset=utf-8',
-      '.css': 'text/css; charset=utf-8',
-      '.js': 'text/javascript; charset=utf-8',
-      '.json': 'application/json; charset=utf-8', '.svg':'image/svg+xml', '.png':'image/png',
-      '.ico': 'image/x-icon', '.woff2': 'font/woff2'
-    }[ext] || 'application/octet-stream';
-    const headers = { 'content-type': type };
-    if (requested.startsWith('/assets/')) headers['cache-control'] = 'public, max-age=31536000, immutable';
-    else headers['cache-control'] = 'no-store';
-    res.writeHead(200, headers);
-    res.end(data);
-  } catch {
-    sendText(res, 404, 'Not found');
+  // Docker images receive the built SPA in public/; source checkouts fall back to frontend/dist.
+  for (const root of [publicDir, frontendDistDir]) {
+    let filePath = path.normalize(path.join(root, requested));
+    if (!filePath.startsWith(root)) return sendText(res, 403, 'Forbidden');
+    try {
+      const data = await fs.readFile(filePath);
+      const ext = path.extname(filePath).toLowerCase();
+      const type = {
+        '.html': 'text/html; charset=utf-8',
+        '.css': 'text/css; charset=utf-8',
+        '.js': 'text/javascript; charset=utf-8',
+        '.json': 'application/json; charset=utf-8', '.svg':'image/svg+xml', '.png':'image/png',
+        '.ico': 'image/x-icon', '.woff2': 'font/woff2'
+      }[ext] || 'application/octet-stream';
+      const headers = { 'content-type': type, ...securityHeaders };
+      if (requested.startsWith('/assets/')) headers['cache-control'] = 'public, max-age=31536000, immutable';
+      else headers['cache-control'] = 'no-store';
+      res.writeHead(200, headers);
+      res.end(data);
+      return;
+    } catch { /* try the next static root */ }
   }
+  sendText(res, 404, 'Not found');
 }
 
 async function handler(req, res) {
@@ -1007,14 +1030,15 @@ async function handler(req, res) {
   const authenticated=()=>sessions.valid(cookieValue(req.headers.cookie));
   const adminReady=()=>Boolean(config.admin?.passwordHash);
   if(url.pathname==='/api/auth/status'&&req.method==='GET')return sendJson(res,200,{authenticated:authenticated(),required:configured&&adminReady()});
-  if(url.pathname==='/api/auth/login'&&req.method==='POST'){if(!sameOrigin())return sendJson(res,403,{ok:false,code:'cross_origin'});const key=req.socket.remoteAddress||'unknown',attempt=failedLogins.get(key)||{count:0,until:0};if(attempt.until>Date.now())return sendJson(res,429,{ok:false,code:'rate_limited'});const body=await readJsonBody(req);if(!await verifyPassword(body?.password,config.admin?.passwordHash)){attempt.count++;attempt.until=attempt.count>=5?Date.now()+60000:0;failedLogins.set(key,attempt);return sendJson(res,401,{ok:false,code:'invalid_credentials'});}failedLogins.delete(key);const token=sessions.create();res.setHeader('set-cookie',sessionCookie(token,{secure:requestIsSecure(req)}));return sendJson(res,200,{ok:true});}
+  if(url.pathname==='/api/auth/login'&&req.method==='POST'){if(!sameOrigin())return sendJson(res,403,{ok:false,code:'cross_origin'});const key=req.socket.remoteAddress||'unknown',attempt=failedLogins.get(key)||{count:0,until:0};if(attempt.until>Date.now())return sendJson(res,429,{ok:false,code:'rate_limited'});const body=await readJsonOr400(req,res);if(body===null)return;if(!await verifyPassword(body?.password,config.admin?.passwordHash)){attempt.count++;attempt.until=attempt.count>=5?Date.now()+60000:0;failedLogins.set(key,attempt);return sendJson(res,401,{ok:false,code:'invalid_credentials'});}failedLogins.delete(key);const token=sessions.create();res.setHeader('set-cookie',sessionCookie(token,{secure:requestIsSecure(req)}));return sendJson(res,200,{ok:true});}
   if(url.pathname==='/api/auth/logout'&&req.method==='POST'){if(!sameOrigin())return sendJson(res,403,{ok:false,code:'cross_origin'});sessions.remove(cookieValue(req.headers.cookie));res.setHeader('set-cookie',clearedSessionCookie(requestIsSecure(req)));return sendJson(res,200,{ok:true});}
   if (url.pathname === '/api/health') return sendJson(res, 200, { status: configured?'ok':'setup_required', service:'ArrSight', version:packageJson.version });
   if (url.pathname === '/api/config' && req.method === 'GET') {if(configured&&adminReady()&&!authenticated())return sendJson(res,401,{configured:true,code:'authentication_required'});return sendJson(res,200,{configured,config:publicConfig(config)});}
   if (url.pathname === '/api/config' && req.method === 'PUT') {
     if(!sameOrigin()) return sendJson(res,403,{ok:false,code:'cross_origin'});
-    const body=await readJsonBody(req); if(!body||typeof body!=='object') return sendJson(res,400,{ok:false,code:'invalid_json'});
-    if((!configured||!adminReady()) && (body.setupCode!==setupCode || Date.now()>setupCodeExpiresAt)) return sendJson(res,403,{ok:false,code:Date.now()>setupCodeExpiresAt?'setup_code_expired':'setup_code_invalid'});
+    const body=await readJsonOr400(req,res); if(body===null)return; if(!body||typeof body!=='object') return sendJson(res,400,{ok:false,code:'invalid_json'});
+    const setupCodeValid=typeof setupCode==='string'&&typeof body?.setupCode==='string'&&Date.now()<=setupCodeExpiresAt&&timingSafeEqualString(body.setupCode,setupCode);
+    if((!configured||!adminReady()) && !setupCodeValid) return sendJson(res,403,{ok:false,code:Date.now()>setupCodeExpiresAt?'setup_code_expired':'setup_code_invalid'});
     if(configured&&adminReady()&&!authenticated())return sendJson(res,401,{ok:false,code:'authentication_required'});
     const {setupCode:_setupCode,adminPassword:_adminPassword,configVersion:_configVersion,productName:_productName,port:_port,...configBody}=body;const normalized=normalizeConfigInput(configBody);if(normalized.errors.length)return sendJson(res,400,{ok:false,code:'validation_failed',errors:normalized.errors});const candidate=normalized.value;
     const next=applySecretUpdates(migrateConfig(deepMerge(config,candidate)),config); if(candidate.links)next.links=candidate.links; const errors=validateConfig(next); if(errors.length) return sendJson(res,400,{ok:false,code:'validation_failed',errors});
@@ -1023,19 +1047,19 @@ async function handler(req, res) {
     return sendJson(res,200,{ok:true,config:publicConfig(config)});
   }
   if (url.pathname === '/api/test/path' && req.method === 'POST') {
-    if(!sameOrigin()) return sendJson(res,403,{ok:false,code:'cross_origin'});if(configured&&adminReady()&&!authenticated())return sendJson(res,401,{ok:false,code:'authentication_required'}); const body=await readJsonBody(req);
+    if(!sameOrigin()) return sendJson(res,403,{ok:false,code:'cross_origin'});if(configured&&adminReady()&&!authenticated())return sendJson(res,401,{ok:false,code:'authentication_required'}); const body=await readJsonOr400(req,res); if(body===null)return;
     if(!validateMountPath(body?.path,body?.category)) return sendJson(res,400,{ok:false,code:'path_not_allowed'});
     try{ await fs.access(path.resolve(body.path),fsConstants.R_OK); return sendJson(res,200,{ok:true,code:'path_readable'}); }catch{return sendJson(res,400,{ok:false,code:'path_unreadable'});}
   }
   if (url.pathname === '/api/test/integration' && req.method === 'POST') {
-    if(!sameOrigin()) return sendJson(res,403,{ok:false,code:'cross_origin'});if(configured&&adminReady()&&!authenticated())return sendJson(res,401,{ok:false,code:'authentication_required'}); const body=await readJsonBody(req); if(!integrations.includes(body?.name)) return sendJson(res,400,{ok:false,code:'unknown_integration'});
+    if(!sameOrigin()) return sendJson(res,403,{ok:false,code:'cross_origin'});if(configured&&adminReady()&&!authenticated())return sendJson(res,401,{ok:false,code:'authentication_required'}); const body=await readJsonOr400(req,res); if(body===null)return; if(!integrations.includes(body?.name)) return sendJson(res,400,{ok:false,code:'unknown_integration'});
     const merged=deepMerge(config[body.name]||{},body.settings||{}); if(!merged.apiKey) merged.apiKey=config[body.name]?.apiKey||''; if(validateConfig({...config,[body.name]:merged}).length) return sendJson(res,400,{ok:false,code:'validation_failed'});
     if(!merged.url)return sendJson(res,400,{ok:false,code:'url_required'});const result=await testIntegration(body.name,merged,fetchJson);return sendJson(res,result.ok?200:502,result);
   }
   if (url.pathname === '/api/action' && req.method === 'POST') {
     if(!sameOrigin()) return sendJson(res,403,{ok:false,code:'cross_origin'});
     if(configured&&adminReady()&&!authenticated())return sendJson(res,401,{ok:false,code:'authentication_required'});
-    const body = await readJsonBody(req);
+    const body=await readJsonOr400(req,res); if(body===null)return;
     const result = await runAction(body);
     return sendJson(res, result.status || (result.ok ? 200 : 400), result);
   }
@@ -1055,7 +1079,10 @@ async function handler(req, res) {
 
 await loadConfig();
 const server = http.createServer((req, res) => {
-  handler(req, res).catch((error) => sendJson(res, 500, { error: error.message }));
+  handler(req, res).catch((error) => {
+    console.error('Request failed:', error.message);
+    if (!res.headersSent) sendJson(res, 500, { error: 'internal_error' });
+  });
 });
 
 server.listen(config.port, '0.0.0.0', () => {
@@ -1070,3 +1097,8 @@ setInterval(async () => {
   try { await buildSnapshot(true); } catch (error) { console.error('Background measurement failed:', error.message); }
   finally { measurementRunning = false; }
 }, Math.max(1, Number(config.monitoring.sampleMinutes || 5)) * 60000).unref();
+
+setInterval(() => {
+  sessions.cleanup();
+  for (const [key, attempt] of failedLogins) if (attempt.until && attempt.until < Date.now()) failedLogins.delete(key);
+}, 10 * 60 * 1000).unref();
