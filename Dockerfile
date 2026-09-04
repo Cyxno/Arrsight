@@ -3,6 +3,7 @@ WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY frontend/ ./
+COPY public /public
 RUN npm run build
 
 FROM node:20-alpine AS runtime

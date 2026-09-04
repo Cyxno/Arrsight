@@ -1,8 +1,11 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 
+// Static icons live in the repository's public/ directory, one level above
+// frontend/ (also copied to /public in the Docker build stage).
 export default defineConfig({
-  publicDir: '../public',
+  publicDir: fileURLToPath(new URL('../public', import.meta.url)),
   plugins: [svelte()],
   build: {
     outDir: 'dist',
