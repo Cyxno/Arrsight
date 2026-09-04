@@ -1,3 +1,10 @@
+FROM node:20-alpine AS frontend
+WORKDIR /build
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY frontend/ ./
+RUN npm run build
+
 FROM node:20-alpine AS runtime
 LABEL org.opencontainers.image.title="ArrSight" org.opencontainers.image.description="Media stack health, at a glance." org.opencontainers.image.source="https://github.com/Cyxno/arr-health-dashboard" org.opencontainers.image.url="https://github.com/Cyxno/arr-health-dashboard" org.opencontainers.image.licenses="MIT"
 ARG VCS_REF="unknown" VERSION="1.1.0"
@@ -6,7 +13,7 @@ ENV NODE_ENV=production CONFIG_DIR=/config
 WORKDIR /app
 COPY --chown=node:node package.json server.js ./
 COPY --chown=node:node lib ./lib
-COPY --chown=node:node public ./public
+COPY --from=frontend --chown=node:node /build/dist ./public
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN apk add --no-cache su-exec && chmod 755 /usr/local/bin/docker-entrypoint.sh && mkdir -p /config
 EXPOSE 8090

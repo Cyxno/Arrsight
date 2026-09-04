@@ -1,0 +1,145 @@
+/* ArrSight design system — dark-first, calm, compact. */
+
+:root {
+  color-scheme: dark;
+  --bg: #0b0d10;
+  --surface: #111418;
+  --surface-2: #171b21;
+  --surface-3: #1d232b;
+  --border: #232932;
+  --border-strong: #303845;
+  --text: #e7eaef;
+  --text-muted: #8d95a3;
+  --text-faint: #5d6572;
+  --accent: #4c8dff;
+  --accent-soft: rgba(76, 141, 255, 0.14);
+  --ok: #2fbf71;
+  --ok-soft: rgba(47, 191, 113, 0.13);
+  --warn: #e8a33d;
+  --warn-soft: rgba(232, 163, 61, 0.14);
+  --err: #e5534b;
+  --err-soft: rgba(229, 83, 75, 0.13);
+  --info: #4cb3ff;
+  --info-soft: rgba(76, 179, 255, 0.13);
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --radius: 10px;
+  --radius-small: 7px;
+  --sidebar-width: 224px;
+  --font: 'Inter', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --mono: ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, Consolas, monospace;
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f3f5f8;
+  --surface: #ffffff;
+  --surface-2: #f7f9fb;
+  --surface-3: #eef1f5;
+  --border: #dde3ea;
+  --border-strong: #c6cfd9;
+  --text: #1a212b;
+  --text-muted: #5c6673;
+  --text-faint: #8a94a1;
+  --accent: #2f6fed;
+  --accent-soft: rgba(47, 111, 237, 0.1);
+  --ok: #1a9e5c;
+  --ok-soft: rgba(26, 158, 92, 0.1);
+  --warn: #b97a10;
+  --warn-soft: rgba(185, 122, 16, 0.12);
+  --err: #d43f38;
+  --err-soft: rgba(212, 63, 56, 0.09);
+  --info: #0e7fc4;
+  --info-soft: rgba(14, 127, 196, 0.1);
+  --shadow: 0 6px 20px rgba(23, 32, 44, 0.08);
+}
+
+@media (prefers-color-scheme: light) {
+  [data-theme='auto'] {
+    color-scheme: light;
+    --bg: #f3f5f8;
+    --surface: #ffffff;
+    --surface-2: #f7f9fb;
+    --surface-3: #eef1f5;
+    --border: #dde3ea;
+    --border-strong: #c6cfd9;
+    --text: #1a212b;
+    --text-muted: #5c6673;
+    --text-faint: #8a94a1;
+    --accent: #2f6fed;
+    --accent-soft: rgba(47, 111, 237, 0.1);
+    --ok: #1a9e5c;
+    --ok-soft: rgba(26, 158, 92, 0.1);
+    --warn: #b97a10;
+    --warn-soft: rgba(185, 122, 16, 0.12);
+    --err: #d43f38;
+    --err-soft: rgba(212, 63, 56, 0.09);
+    --info: #0e7fc4;
+    --info-soft: rgba(14, 127, 196, 0.1);
+    --shadow: 0 6px 20px rgba(23, 32, 44, 0.08);
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13.5px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+p { margin: 0; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+button {
+  font: inherit;
+  color: inherit;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, opacity 120ms ease;
+}
+button:hover:not(:disabled) { background: var(--surface-3); border-color: var(--border-strong); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+select, input {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  padding: 6px 10px;
+}
+select:hover { border-color: var(--border-strong); }
+
+::selection { background: var(--accent-soft); }
+
+/* Scrollbars — slim and quiet */
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 6px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

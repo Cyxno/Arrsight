@@ -977,8 +977,7 @@ async function buildSnapshot(force = false) {
 
 async function serveStatic(req, res) {
   const url = new URL(req.url, 'http://localhost');
-  if (!configured && url.pathname === '/') { res.writeHead(302,{location:'/setup'}); return res.end(); }
-  const requested=url.pathname==='/setup'?'setup.html':url.pathname==='/'?'index.html':url.pathname;
+  const requested = url.pathname === '/' || url.pathname === '/setup' ? '/index.html' : url.pathname;
   let filePath = path.normalize(path.join(publicDir, requested));
   if (!filePath.startsWith(publicDir)) return sendText(res, 403, 'Forbidden');
   try {
@@ -988,9 +987,13 @@ async function serveStatic(req, res) {
       '.html': 'text/html; charset=utf-8',
       '.css': 'text/css; charset=utf-8',
       '.js': 'text/javascript; charset=utf-8',
-      '.json': 'application/json; charset=utf-8', '.svg':'image/svg+xml', '.png':'image/png'
+      '.json': 'application/json; charset=utf-8', '.svg':'image/svg+xml', '.png':'image/png',
+      '.ico': 'image/x-icon', '.woff2': 'font/woff2'
     }[ext] || 'application/octet-stream';
-    res.writeHead(200, { 'content-type': type });
+    const headers = { 'content-type': type };
+    if (requested.startsWith('/assets/')) headers['cache-control'] = 'public, max-age=31536000, immutable';
+    else headers['cache-control'] = 'no-store';
+    res.writeHead(200, headers);
     res.end(data);
   } catch {
     sendText(res, 404, 'Not found');

@@ -13,3 +13,4 @@ actions/
 .DS_Store
 node_modules/
 
+frontend/dist/

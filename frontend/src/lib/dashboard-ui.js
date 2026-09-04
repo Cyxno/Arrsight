@@ -1,17 +1,21 @@
+// Pure dashboard logic, ported from the original public/dashboard-ui.js and
+// extended with the new navigation destinations. Framework-free so the node
+// test suite can exercise it directly.
+
 export const TABS = Object.freeze([
-  { id: 'overview', hash: '#overview', label: 'Overview', panelId: 'panel-overview' },
-  { id: 'downloads', hash: '#downloads', label: 'Downloads', panelId: 'panel-downloads' },
-  { id: 'providers', hash: '#providers', label: 'Providers', panelId: 'panel-providers' },
-  { id: 'system', hash: '#system', label: 'System', panelId: 'panel-system' }
+  { id: 'overview', hash: '#overview', labelKey: 'overview' },
+  { id: 'downloads', hash: '#downloads', labelKey: 'downloads' },
+  { id: 'providers', hash: '#providers', labelKey: 'providers' },
+  { id: 'media', hash: '#media', labelKey: 'media' },
+  { id: 'incidents', hash: '#incidents', labelKey: 'incidents' },
+  { id: 'system', hash: '#system', labelKey: 'system' },
+  { id: 'logs', hash: '#logs', labelKey: 'logs' },
+  { id: 'settings', hash: '#settings', labelKey: 'settings' }
 ]);
 
-export function tabFromHash(hash = '') { const normalized = String(hash || '').toLowerCase(); return TABS.find((tab) => tab.hash === normalized) || TABS[0]; }
-
-export function incidentTab(incident = {}) {
-  if (/provider|usenet|missing-articles/i.test(`${incident.id || ''} ${incident.area || ''} ${incident.source || ''}`)) return 'providers';
-  if (/mount|docker|api|container/i.test(`${incident.id || ''} ${incident.area || ''} ${incident.source || ''}`)) return 'system';
-  if (/queue|import|search|repair/i.test(`${incident.id || ''} ${incident.area || ''} ${incident.source || ''}`)) return 'downloads';
-  return 'overview';
+export function tabFromHash(hash = '') {
+  const normalized = String(hash || '').toLowerCase().replace(/^#\//, '#');
+  return TABS.find((tab) => tab.hash === normalized) || TABS[0];
 }
 
 function fallbackItems(snapshot = {}) {
@@ -30,9 +34,28 @@ function fallbackItems(snapshot = {}) {
 
 export function attentionItems(snapshot = {}) { return Array.isArray(snapshot.attentionItems) ? snapshot.attentionItems : fallbackItems(snapshot); }
 
+export function incidentTab(incident = {}) {
+  if (/provider|usenet|missing-articles/i.test(`${incident.id || ''} ${incident.area || ''} ${incident.source || ''}`)) return 'providers';
+  if (/mount|docker|api|container/i.test(`${incident.id || ''} ${incident.area || ''} ${incident.source || ''}`)) return 'system';
+  if (/queue|import|search|repair/i.test(`${incident.id || ''} ${incident.area || ''} ${incident.source || ''}`)) return 'downloads';
+  return 'overview';
+}
+
+function isMediaItem(item = {}) {
+  return item.tab === 'system' && /plex|jellyfin|bazarr|playback|subtitle|library/i.test(`${item.title || ''} ${item.source || ''}`);
+}
+
 export function calculateTabBadges(snapshot = {}) {
-  const all = attentionItems(snapshot); const result = {};
-  for (const tab of TABS) { const items = tab.id === 'overview' ? all : all.filter((item) => item.tab === tab.id); result[tab.id] = { count: items.length, severity: items.some((item) => item.severity === 'critical') ? 'critical' : items.length ? 'warning' : null }; }
+  const all = attentionItems(snapshot);
+  const result = {};
+  for (const tab of TABS) {
+    let items = [];
+    if (tab.id === 'overview') items = all;
+    else if (tab.id === 'downloads' || tab.id === 'providers' || tab.id === 'system') items = all.filter((item) => item.tab === tab.id);
+    else if (tab.id === 'media') items = all.filter(isMediaItem);
+    else if (tab.id === 'incidents') items = snapshot.incidents?.active || [];
+    result[tab.id] = { count: items.length, severity: items.some((item) => item.severity === 'critical') ? 'critical' : items.length ? 'warning' : null };
+  }
   return result;
 }
 

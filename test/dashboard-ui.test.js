@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import { calculateTabBadges, selectCriticalBanner, selectPrimaryAttention, tabFromHash } from '../public/dashboard-ui.js';
+import { TABS, calculateTabBadges, selectCriticalBanner, selectPrimaryAttention, tabFromHash } from '../frontend/src/lib/dashboard-ui.js';
 
 const baseSnapshot = () => ({
   incidents: { active: [] },
@@ -12,6 +12,7 @@ const baseSnapshot = () => ({
 test('empty or unknown hash safely resolves to overview', () => {
   assert.equal(tabFromHash('').id, 'overview');
   assert.equal(tabFromHash('#unknown').id, 'overview');
+  assert.equal(tabFromHash('#/unknown').id, 'overview');
 });
 
 test('valid hashes resolve to the requested tab', () => {
@@ -19,6 +20,15 @@ test('valid hashes resolve to the requested tab', () => {
   assert.equal(tabFromHash('#downloads').id, 'downloads');
   assert.equal(tabFromHash('#providers').id, 'providers');
   assert.equal(tabFromHash('#system').id, 'system');
+  assert.equal(tabFromHash('#media').id, 'media');
+  assert.equal(tabFromHash('#incidents').id, 'incidents');
+  assert.equal(tabFromHash('#logs').id, 'logs');
+  assert.equal(tabFromHash('#settings').id, 'settings');
+  assert.equal(tabFromHash('#/settings').id, 'settings');
+});
+
+test('navigation exposes the full operations destination set', () => {
+  assert.deepEqual(TABS.map((tab) => tab.id), ['overview', 'downloads', 'providers', 'media', 'incidents', 'system', 'logs', 'settings']);
 });
 
 test('normal active downloads do not create a downloads badge', () => {
@@ -44,6 +54,13 @@ test('a mount incident creates a system badge', () => {
   const snapshot = baseSnapshot();
   snapshot.incidents.active.push({ id: 'mount-read-check', fingerprint: 'mount-1', severity: 'critical', source: 'Live read-test' });
   assert.deepEqual(calculateTabBadges(snapshot).system, { count: 1, severity: 'critical' });
+});
+
+test('a stopped media container creates a media badge', () => {
+  const snapshot = baseSnapshot();
+  snapshot.containers.push({ name: 'plex', ok: false, health: null });
+  assert.equal(calculateTabBadges(snapshot).media.count, 1);
+  assert.equal(calculateTabBadges(snapshot).media.severity, 'critical');
 });
 
 test('global problem total deduplicates repeated incident fingerprints', () => {
@@ -72,41 +89,47 @@ test('server attention list is the single source for badges banner and recommend
   assert.equal(selectPrimaryAttention(snapshot).key, point.key);
 });
 
-test('HTML keeps light, dark and system theme choices and accessible panels', async () => {
-  const html = await fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8');
-  assert.match(html, /value="auto"[^>]*>System/);
-  assert.match(html, /value="light"[^>]*>Light/);
-  assert.match(html, /value="dark"[^>]*>Dark/);
-  assert.match(html, /id="localeSelect"/);
-  assert.equal((html.match(/data-panel="/g) || []).length, 4);
+test('SPA shell keeps system, light and dark theme choices and the app mount', async () => {
+  const html = await fs.readFile(new URL('../frontend/index.html', import.meta.url), 'utf8');
+  assert.match(html, /data-theme="auto"/);
+  assert.match(html, /localStorage\.getItem\('arr-theme'\)/);
+  assert.match(html, /<div id="app"><\/div>/);
+  const topbar = await fs.readFile(new URL('../frontend/src/components/TopBar.svelte', import.meta.url), 'utf8');
+  assert.match(topbar, /value="auto"/);
+  assert.match(topbar, /value="light"/);
+  assert.match(topbar, /value="dark"/);
+  assert.match(topbar, /id="localeSelect"|aria-label=\{t\('language'\)\}/);
 });
 
-test('header branding links to overview without reloading', async () => {
-  const html = await fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8');
-  const css = await fs.readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
-  const link = html.match(/<a class="brand-link" href="#overview"[^>]*>/)?.[0] || '';
-  assert.ok(link, 'branding must be an anchor to #overview');
-  assert.match(link, /data-i18n-aria="backToOverview"/);
-  assert.match(html, /class="brand-link"[\s\S]{0,200}<img src="\/arrsight-mark\.svg" alt="">/);
-  assert.match(css, /\.brand-link \{ display:flex/);
-  assert.match(css, /\.brand-link:focus-visible/);
+test('sidebar branding is an anchor back to overview without reloading', async () => {
+  const sidebar = await fs.readFile(new URL('../frontend/src/components/Sidebar.svelte', import.meta.url), 'utf8');
+  const app = await fs.readFile(new URL('../frontend/src/App.svelte', import.meta.url), 'utf8');
+  assert.match(sidebar, /href="#overview"/);
+  assert.match(sidebar, /aria-label=\{t\('backToOverview'\)\}/);
+  assert.match(sidebar, /arrsight-mark\.svg/);
+  assert.match(sidebar, /event\.preventDefault\(\)/, 'branding navigation must prevent the default anchor reload');
+  assert.match(app, /class="shell"/);
 });
 
-test('header status is dynamic and reflects real snapshot and localized failure', async () => {
-  const html = await fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8');
-  const source = await fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8');
-  const statusTag = html.match(/<span id="headerStatus"[^>]*>/)?.[0] || '';
-  assert.ok(statusTag && !statusTag.includes('data-i18n'), 'header status must not carry a static data-i18n key that translateDom overwrites');
-  assert.ok(source.includes("$('headerStatus').className = `badge ${safe(snapshot, 'overview.status', 'unknown')}`"));
-  assert.ok(source.includes("$('headerStatus').textContent = label(safe(snapshot, 'overview.status', 'unknown'))"));
-  assert.ok(source.includes("$('headerStatus').textContent = t('unavailable')"));
-  assert.ok(source.includes("location.href = '/setup'"));
+test('header status stays dynamic and localizes failures', async () => {
+  const topbar = await fs.readFile(new URL('../frontend/src/components/TopBar.svelte', import.meta.url), 'utf8');
+  assert.match(topbar, /\$snapshot\?\.overview\?\.status/);
+  assert.match(topbar, /t\('unavailable'\)/);
+  assert.match(topbar, /loadSnapshot\(true\)/);
 });
 
-test('client listens for hash changes without loading another snapshot', async () => {
-  const source = await fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8');
-  assert.match(source, /addEventListener\('hashchange', handleHashChange\)/);
-  const handler = source.match(/function handleHashChange\(\) \{[\s\S]*?\n\}/)?.[0] || '';
-  assert.match(handler, /renderTabs\(\)/);
-  assert.doesNotMatch(handler, /load\(/);
+test('SPA listens for hash changes without refetching the snapshot', async () => {
+  const app = await fs.readFile(new URL('../frontend/src/App.svelte', import.meta.url), 'utf8');
+  assert.match(app, /addEventListener\('hashchange', onHash\)/);
+  const handler = app.match(/const onHash = \(\) => \{[\s\S]*?\};/)?.[0] || '';
+  assert.match(handler, /syncRouteFromLocation\(\)/);
+  assert.doesNotMatch(handler, /loadSnapshot|api\./);
+});
+
+test('every navigation destination has a translated label in both languages', async () => {
+  const { dictionaries } = await import('../frontend/src/lib/i18n.js');
+  for (const tab of TABS) {
+    assert.ok(dictionaries.en[tab.labelKey], `missing en label for ${tab.id}`);
+    assert.ok(dictionaries.nl[tab.labelKey], `missing nl label for ${tab.id}`);
+  }
 });
