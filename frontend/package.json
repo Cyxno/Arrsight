@@ -1,6 +1,6 @@
 {
   "name": "arrsight-frontend",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "private": true,
   "version": "1.3.0",
   "type": "module",

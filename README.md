@@ -91,7 +91,7 @@ Keep ArrSight behind a trusted network or authenticated reverse proxy. Setup and
 
 ## License
 
-[MIT](LICENSE)
+[AGPL-3.0-only](LICENSE)
 
 ## Development
 
